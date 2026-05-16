@@ -81,7 +81,10 @@ function getPreferredModelId(
 }
 
 export interface NewSessionFormProps {
-  projectId: string;
+  projectId: string | null;
+  chatProjectId: string | null;
+  workspaceMode: "chat" | "project";
+  onWorkspaceModeChange: (mode: "chat" | "project") => void;
   /** Whether to focus the textarea on mount (default: true) */
   autoFocus?: boolean;
   /** Number of rows for the textarea (default: 6) */
@@ -94,6 +97,9 @@ export interface NewSessionFormProps {
 
 export function NewSessionForm({
   projectId,
+  chatProjectId,
+  workspaceMode,
+  onWorkspaceModeChange,
   autoFocus = true,
   rows = 6,
   placeholder,
@@ -119,13 +125,20 @@ export function NewSessionForm({
   >({});
   const [interimTranscript, setInterimTranscript] = useState("");
   const [isSavingDefaults, setIsSavingDefaults] = useState(false);
+  const [codexPlanMode, setCodexPlanMode] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const voiceButtonRef = useRef<VoiceInputButtonRef>(null);
   const hasInitializedDefaultsRef = useRef(false);
 
   // Thinking toggle state
-  const { thinkingMode, cycleThinkingMode, thinkingLevel } = useModelSettings();
+  const {
+    thinkingMode,
+    thinkingLevel,
+    cycleThinkingMode,
+    setThinkingMode,
+    setEffortLevel,
+  } = useModelSettings();
 
   // Connection for uploads (uses WebSocket when enabled)
   const connection = useConnection();
@@ -147,16 +160,38 @@ export function NewSessionForm({
   const availableProviders = getAvailableProviders(providers);
   const resolvedPlaceholder = placeholder ?? t("newSessionPlaceholder");
   const modeLabels: Record<PermissionMode, string> = {
-    default: t("modeDefaultLabel"),
-    acceptEdits: t("modeAcceptEditsLabel"),
-    plan: t("modePlanLabel"),
-    bypassPermissions: t("modeBypassPermissionsLabel"),
+    default:
+      selectedProvider === "codex"
+        ? t("modeCodexDefaultLabel")
+        : t("modeDefaultLabel"),
+    acceptEdits:
+      selectedProvider === "codex"
+        ? t("modeCodexAcceptEditsLabel")
+        : t("modeAcceptEditsLabel"),
+    plan:
+      selectedProvider === "codex" ? t("modeCodexPlanLabel") : t("modePlanLabel"),
+    bypassPermissions:
+      selectedProvider === "codex"
+        ? t("modeCodexBypassPermissionsLabel")
+        : t("modeBypassPermissionsLabel"),
   };
   const modeDescriptions: Record<PermissionMode, string> = {
-    default: t("modeDefaultDescription"),
-    acceptEdits: t("modeAcceptEditsDescription"),
-    plan: t("modePlanDescription"),
-    bypassPermissions: t("modeBypassPermissionsDescription"),
+    default:
+      selectedProvider === "codex"
+        ? t("modeCodexDefaultDescription")
+        : t("modeDefaultDescription"),
+    acceptEdits:
+      selectedProvider === "codex"
+        ? t("modeCodexAcceptEditsDescription")
+        : t("modeAcceptEditsDescription"),
+    plan:
+      selectedProvider === "codex"
+        ? t("modeCodexPlanDescription")
+        : t("modePlanDescription"),
+    bypassPermissions:
+      selectedProvider === "codex"
+        ? t("modeCodexBypassPermissionsDescription")
+        : t("modeBypassPermissionsDescription"),
   };
 
   // Get models and capabilities for the currently selected provider
@@ -169,6 +204,22 @@ export function NewSessionForm({
     selectedProviderInfo?.supportsPermissionMode ?? true;
   const supportsThinkingToggle =
     selectedProviderInfo?.supportsThinkingToggle ?? true;
+  const visibleModes =
+    selectedProvider === "codex"
+      ? MODE_ORDER.filter((m) => m !== "plan")
+      : MODE_ORDER;
+
+  useEffect(() => {
+    if (selectedProvider !== "codex" && workspaceMode === "chat") {
+      onWorkspaceModeChange("project");
+    }
+  }, [onWorkspaceModeChange, selectedProvider, workspaceMode]);
+
+  useEffect(() => {
+    if (selectedProvider === "codex" && mode === "plan") {
+      setMode("default");
+    }
+  }, [mode, selectedProvider]);
 
   // Initialize provider/model/mode from saved defaults once settings and providers load.
   useEffect(() => {
@@ -245,6 +296,33 @@ export function NewSessionForm({
       return { value: model.id, label, description };
     });
   }, [availableModels]);
+
+  const reasoningValue =
+    thinkingMode === "auto"
+      ? "auto"
+      : thinkingMode === "off"
+        ? "auto"
+        : `on:${thinkingLevel}`;
+  const reasoningOptions: FilterOption<string>[] = [
+    { value: "auto", label: t("codexReasoningAuto") },
+    { value: "on:low", label: t("codexReasoningLow") },
+    { value: "on:medium", label: t("codexReasoningMedium") },
+    { value: "on:high", label: t("codexReasoningHigh") },
+    { value: "on:max", label: t("codexReasoningMax") },
+  ];
+  const handleReasoningSelect = useCallback(
+    (selected: string[]) => {
+      const value = selected[0];
+      if (!value) return;
+      if (value === "auto") {
+        setThinkingMode("auto");
+        return;
+      }
+      setThinkingMode("on");
+      setEffortLevel(value.slice(3) as typeof thinkingLevel);
+    },
+    [setEffortLevel, setThinkingMode, thinkingLevel],
+  );
 
   // Handle model selection from FilterDropdown
   const handleModelSelect = useCallback((selected: string[]) => {
@@ -358,9 +436,14 @@ export function NewSessionForm({
     }
 
     const hasContent = finalMessage.trim() || pendingFiles.length > 0;
-    if (!projectId || !hasContent || isStarting) return;
-
     const trimmedMessage = finalMessage.trim();
+    const activeProjectId =
+      workspaceMode === "chat"
+        ? (
+            await api.getChatProjectForMessage(trimmedMessage || "chat")
+          ).project.id
+        : projectId;
+    if (!activeProjectId || !hasContent || isStarting) return;
 
     setInterimTranscript("");
     setIsStarting(true);
@@ -374,6 +457,7 @@ export function NewSessionForm({
       const thinking = getThinkingSetting();
       const sessionOptions = {
         mode,
+        planMode: selectedProvider === "codex" ? codexPlanMode : undefined,
         model: selectedModel ?? undefined,
         thinking,
         provider: selectedProvider ?? undefined,
@@ -383,7 +467,10 @@ export function NewSessionForm({
       if (pendingFiles.length > 0) {
         // Two-phase flow: create session first, then upload to real session folder
         // Step 1: Create the session without sending a message
-        const createResult = await api.createSession(projectId, sessionOptions);
+        const createResult = await api.createSession(
+          activeProjectId,
+          sessionOptions,
+        );
         sessionId = createResult.sessionId;
         processId = createResult.processId;
 
@@ -391,7 +478,7 @@ export function NewSessionForm({
         for (const pendingFile of pendingFiles) {
           try {
             const uploadedFile = await connection.upload(
-              projectId,
+              activeProjectId,
               sessionId,
               pendingFile.file,
               {
@@ -424,6 +511,7 @@ export function NewSessionForm({
           sessionId,
           trimmedMessage,
           mode,
+          selectedProvider === "codex" ? codexPlanMode : undefined,
           uploadedFiles.length > 0 ? uploadedFiles : undefined,
           undefined, // tempId
           thinking, // Pass the captured thinking setting to avoid process restart
@@ -431,7 +519,7 @@ export function NewSessionForm({
       } else {
         // No files - use single-step flow for efficiency
         const result = await api.startSession(
-          projectId,
+          activeProjectId,
           trimmedMessage,
           sessionOptions,
         );
@@ -451,7 +539,7 @@ export function NewSessionForm({
       // without waiting for getSession to complete
       // Also pass initial message as optimistic title (session name = first message)
       // Pass model/provider so ProviderBadge can render immediately
-      navigate(`${basePath}/projects/${projectId}/sessions/${sessionId}`, {
+      navigate(`${basePath}/projects/${activeProjectId}/sessions/${sessionId}`, {
         state: {
           initialStatus: { state: "owned", processId },
           initialTitle: trimmedMessage,
@@ -635,7 +723,17 @@ export function NewSessionForm({
             disabled={isStarting}
             className="toolbar-button"
           />
-          {supportsThinkingToggle && (
+          {supportsThinkingToggle && selectedProvider === "codex" && (
+            <FilterDropdown
+              label={t("reasoningModalTitle")}
+              options={reasoningOptions}
+              selected={[reasoningValue]}
+              onChange={handleReasoningSelect}
+              multiSelect={false}
+              placeholder={t("codexReasoningAuto")}
+            />
+          )}
+          {supportsThinkingToggle && selectedProvider !== "codex" && (
             <button
               type="button"
               className={`toolbar-button thinking-toggle-button ${thinkingMode !== "off" ? `active ${thinkingMode}` : ""}`}
@@ -780,6 +878,46 @@ export function NewSessionForm({
 
       <div className="new-session-input-area">{inputArea}</div>
 
+      {selectedProvider === "codex" && (
+        <div className="new-session-executor-section">
+          <h3>{t("newSessionWorkspaceTitle")}</h3>
+          <div className="executor-options">
+            <button
+              type="button"
+              className={`executor-option ${workspaceMode === "chat" ? "selected" : ""}`}
+              onClick={() => onWorkspaceModeChange("chat")}
+              disabled={isStarting || !chatProjectId}
+            >
+              <span className="executor-option-dot executor-local" />
+              <div className="executor-option-content">
+                <span className="executor-option-label">
+                  {t("newSessionWorkspaceChat")}
+                </span>
+                <span className="executor-option-desc">
+                  {t("newSessionWorkspaceChatDesc")}
+                </span>
+              </div>
+            </button>
+            <button
+              type="button"
+              className={`executor-option ${workspaceMode === "project" ? "selected" : ""}`}
+              onClick={() => onWorkspaceModeChange("project")}
+              disabled={isStarting || !projectId}
+            >
+              <span className="executor-option-dot executor-remote" />
+              <div className="executor-option-content">
+                <span className="executor-option-label">
+                  {t("newSessionWorkspaceProject")}
+                </span>
+                <span className="executor-option-desc">
+                  {t("newSessionWorkspaceProjectDesc")}
+                </span>
+              </div>
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Provider Selection */}
       {!providersLoading && availableProviders.length > 1 && (
         <div className="new-session-provider-section">
@@ -889,7 +1027,7 @@ export function NewSessionForm({
         <div className="new-session-mode-section">
           <h3>{t("newSessionModeTitle")}</h3>
           <div className="mode-options">
-            {MODE_ORDER.map((m) => (
+            {visibleModes.map((m) => (
               <button
                 key={m}
                 type="button"
@@ -907,6 +1045,22 @@ export function NewSessionForm({
               </button>
             ))}
           </div>
+
+          {selectedProvider === "codex" && (
+            <button
+              type="button"
+              className={`codex-plan-button new-session-plan-button ${
+                codexPlanMode ? "active" : ""
+              }`}
+              onClick={() => setCodexPlanMode((value) => !value)}
+              disabled={isStarting}
+              aria-pressed={codexPlanMode}
+              title={modeDescriptions.plan}
+            >
+              <span className="codex-plan-dot" />
+              <span>{modeLabels.plan}</span>
+            </button>
+          )}
 
           <div className="new-session-defaults-bar">
             <p className="new-session-defaults-copy">

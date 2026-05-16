@@ -5,6 +5,8 @@ export type { SandboxMode } from "./generated/v2/SandboxMode.js";
 export type { ThreadStartParams } from "./generated/v2/ThreadStartParams.js";
 export type { ThreadResumeParams } from "./generated/v2/ThreadResumeParams.js";
 export type { TurnStartParams } from "./generated/v2/TurnStartParams.js";
+export type { SandboxPolicy } from "./generated/v2/SandboxPolicy.js";
+export type { CollaborationMode } from "./generated/CollaborationMode.js";
 export type { ThreadStartResponse } from "./generated/v2/ThreadStartResponse.js";
 export type { ThreadResumeResponse } from "./generated/v2/ThreadResumeResponse.js";
 export type { TurnStartResponse } from "./generated/v2/TurnStartResponse.js";

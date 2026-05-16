@@ -80,6 +80,12 @@ export interface ProcessConstructorOptions extends ProcessOptions {
   supportedCommandsFn?: () => Promise<SlashCommand[]>;
   /** Function to change model mid-session (SDK 0.2.7+) */
   setModelFn?: (model?: string) => Promise<void>;
+  /** 手动触发当前会话的上下文压缩 */
+  compactFn?: () => Promise<void>;
+  /** 将权限模式同步到提供方会话。 */
+  setPermissionModeFn?: (mode: PermissionMode) => Promise<void> | void;
+  /** 将计划模式同步到提供方会话。 */
+  setPlanModeFn?: (enabled: boolean) => Promise<void> | void;
 }
 
 export class Process {
@@ -157,6 +163,14 @@ export class Process {
 
   /** Function to change model mid-session (SDK 0.2.7+) */
   private setModelFn: ((model?: string) => Promise<void>) | null;
+  /** 手动触发当前会话的上下文压缩 */
+  private compactFn: (() => Promise<void>) | null;
+  /** 将权限模式同步到提供方会话。 */
+  private setPermissionModeFn:
+    | ((mode: PermissionMode) => Promise<void> | void)
+    | null;
+  /** 将计划模式同步到提供方会话。 */
+  private setPlanModeFn: ((enabled: boolean) => Promise<void> | void) | null;
 
   /** Resolvers waiting for the real session ID */
   private sessionIdResolvers: Array<(id: string) => void> = [];
@@ -218,6 +232,9 @@ export class Process {
     this.supportedCommandsFn = options.supportedCommandsFn ?? null;
     this._pidResolver = options.pid;
     this.setModelFn = options.setModelFn ?? null;
+    this.compactFn = options.compactFn ?? null;
+    this.setPermissionModeFn = options.setPermissionModeFn ?? null;
+    this.setPlanModeFn = options.setPlanModeFn ?? null;
     this._isProcessAlive = options.isProcessAlive ?? null;
     this._lastMessageTime = new Date();
 
@@ -432,6 +449,11 @@ export class Process {
     return this.setModelFn !== null;
   }
 
+  /** 当前进程是否支持手动压缩。 */
+  get supportsCompact(): boolean {
+    return this.compactFn !== null;
+  }
+
   /**
    * Get the list of available models from the SDK.
    * Only supported by Claude SDK 0.2.7+.
@@ -488,6 +510,24 @@ export class Process {
       this._resolvedModel = model;
     }
     return true;
+  }
+
+  /** 手动触发当前会话的上下文压缩。 */
+  async compact(): Promise<boolean> {
+    if (!this.compactFn) {
+      return false;
+    }
+
+    await this.compactFn();
+    return true;
+  }
+
+  /** 标记一次会话级操作已经结束。 */
+  finishControlOperation(): void {
+    if (this._state.type === "terminated") {
+      return;
+    }
+    this.transitionToIdle();
   }
 
   /**
@@ -596,8 +636,13 @@ export class Process {
    */
   setPermissionMode(mode: PermissionMode): void {
     this._permissionMode = mode;
+    void this.setPermissionModeFn?.(mode);
     this._modeVersion++;
     this.emit({ type: "mode-change", mode, version: this._modeVersion });
+  }
+
+  setPlanMode(enabled: boolean): void {
+    void this.setPlanModeFn?.(enabled);
   }
 
   /**

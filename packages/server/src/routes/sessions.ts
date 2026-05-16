@@ -1,4 +1,12 @@
 import {
+  access,
+  mkdir,
+  readFile,
+  writeFile,
+} from "node:fs/promises";
+import { homedir } from "node:os";
+import { basename, dirname, join, normalize } from "node:path";
+import {
   type ContextUsage,
   type ModelOption,
   type PermissionRules,
@@ -40,10 +48,12 @@ import type {
 } from "../supervisor/Supervisor.js";
 import type { QueuedResponse } from "../supervisor/WorkerQueue.js";
 import type { ContentBlock, Message, Project } from "../supervisor/types.js";
+import { getDefaultCodexHomeDir } from "../projects/codex-scanner.js";
 import {
   isValidSshHostAlias,
   normalizeSshHostAlias,
 } from "../utils/sshHostAlias.js";
+import { withFileLock } from "../utils/fileLock.js";
 import type { EventBus } from "../watcher/index.js";
 
 /**
@@ -95,6 +105,187 @@ function isCodexProviderName(
   return provider === "codex" || provider === "codex-oss";
 }
 
+function normalizePathForCompare(path: string): string {
+  return normalize(path).replace(/\\/g, "/").toLowerCase();
+}
+
+function getCodexProjectlessRoot(): string {
+  return join(homedir(), "Documents", "Codex");
+}
+
+function isCodexProjectlessPath(projectPath: string): boolean {
+  const normalizedPath = normalizePathForCompare(projectPath);
+  const normalizedRoot = normalizePathForCompare(getCodexProjectlessRoot());
+  if (!normalizedPath.startsWith(`${normalizedRoot}/`)) {
+    return false;
+  }
+
+  const relative = normalizedPath.slice(normalizedRoot.length + 1);
+  const segments = relative.split("/").filter(Boolean);
+  return segments.length >= 2;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function createCodexThreadTitle(
+  message: string | undefined,
+  projectPath: string,
+): string {
+  const normalized = message
+    ?.split(/\r?\n/)
+    .map((line) => line.trim())
+    .find((line) => line.length > 0);
+
+  return normalized ?? basename(projectPath);
+}
+
+async function ensureFileExists(filePath: string): Promise<void> {
+  try {
+    await access(filePath);
+  } catch {
+    await mkdir(dirname(filePath), { recursive: true });
+    await writeFile(filePath, "", "utf-8");
+  }
+}
+
+async function syncCodexDesktopProjectlessThread(options: {
+  sessionId: string;
+  projectPath: string;
+  title: string;
+  updatedAt?: string;
+  initialPrompt?: string;
+}): Promise<void> {
+  if (!isCodexProjectlessPath(options.projectPath)) {
+    return;
+  }
+
+  const codexHome = getDefaultCodexHomeDir();
+  const sessionIndexPath = join(codexHome, "session_index.jsonl");
+  const globalStatePath = join(codexHome, ".codex-global-state.json");
+  const projectlessRoot = getCodexProjectlessRoot();
+  const updatedAt = options.updatedAt ?? new Date().toISOString();
+
+  try {
+    await ensureFileExists(sessionIndexPath);
+    await withFileLock(sessionIndexPath, async () => {
+      const raw = await readFile(sessionIndexPath, "utf-8");
+      const rows = raw
+        .split(/\r?\n/)
+        .filter((line) => line.trim().length > 0)
+        .map((line) => {
+          try {
+            return JSON.parse(line) as {
+              id?: string;
+              thread_name?: string;
+              updated_at?: string;
+            };
+          } catch {
+            return null;
+          }
+        })
+        .filter(
+          (
+            row,
+          ): row is { id?: string; thread_name?: string; updated_at?: string } =>
+            row !== null,
+        )
+        .filter((row) => row.id !== options.sessionId);
+
+      rows.push({
+        id: options.sessionId,
+        thread_name: options.title,
+        updated_at: updatedAt,
+      });
+
+      const nextContent =
+        rows.map((row) => JSON.stringify(row)).join("\n") + "\n";
+      await writeFile(sessionIndexPath, nextContent, "utf-8");
+    });
+  } catch (error) {
+    console.warn("[CodexDesktopSync] Failed to update session index", error);
+  }
+
+  try {
+    await ensureFileExists(globalStatePath);
+    await withFileLock(globalStatePath, async () => {
+      const raw = await readFile(globalStatePath, "utf-8");
+      const state =
+        raw.trim().length > 0
+          ? (JSON.parse(raw) as Record<string, unknown>)
+          : {};
+
+      const projectlessThreads = Array.isArray(state["projectless-thread-ids"])
+        ? [...(state["projectless-thread-ids"] as string[])]
+        : [];
+      if (!projectlessThreads.includes(options.sessionId)) {
+        projectlessThreads.push(options.sessionId);
+      }
+      state["projectless-thread-ids"] = projectlessThreads;
+
+      const hints =
+        state["thread-workspace-root-hints"] &&
+        typeof state["thread-workspace-root-hints"] === "object"
+          ? {
+              ...(state["thread-workspace-root-hints"] as Record<string, string>),
+            }
+          : {};
+      hints[options.sessionId] = projectlessRoot;
+      state["thread-workspace-root-hints"] = hints;
+
+      const atomState =
+        state["electron-persisted-atom-state"] &&
+        typeof state["electron-persisted-atom-state"] === "object"
+          ? {
+              ...(state["electron-persisted-atom-state"] as Record<
+                string,
+                unknown
+              >),
+            }
+          : {};
+
+      const promptHistory =
+        atomState["prompt-history"] &&
+        typeof atomState["prompt-history"] === "object"
+          ? {
+              ...(atomState["prompt-history"] as Record<string, unknown>),
+            }
+          : {};
+      const initialPrompt = options.initialPrompt?.trim();
+      if (initialPrompt) {
+        promptHistory[options.sessionId] = [initialPrompt];
+      } else if (!(options.sessionId in promptHistory)) {
+        promptHistory[options.sessionId] = [];
+      }
+      atomState["prompt-history"] = promptHistory;
+
+      const heartbeatPermissions =
+        atomState["heartbeat-thread-permissions-by-id"] &&
+        typeof atomState["heartbeat-thread-permissions-by-id"] === "object"
+          ? {
+              ...(atomState[
+                "heartbeat-thread-permissions-by-id"
+              ] as Record<string, unknown>),
+            }
+          : {};
+      if (!(options.sessionId in heartbeatPermissions)) {
+        heartbeatPermissions[options.sessionId] = {
+          approvalPolicy: "never",
+          approvalsReviewer: "user",
+          sandboxPolicy: { type: "dangerFullAccess" },
+        };
+      }
+      atomState["heartbeat-thread-permissions-by-id"] = heartbeatPermissions;
+      state["electron-persisted-atom-state"] = atomState;
+
+      await writeFile(globalStatePath, JSON.stringify(state), "utf-8");
+    });
+  } catch (error) {
+    console.warn("[CodexDesktopSync] Failed to update global state", error);
+  }
+}
+
 export interface SessionsDeps {
   supervisor: Supervisor;
   scanner: ProjectScanner;
@@ -123,6 +314,7 @@ interface StartSessionBody {
   documents?: string[];
   attachments?: UploadedFile[];
   mode?: PermissionMode;
+  planMode?: boolean;
   model?: ModelOption;
   thinking?: ThinkingOption;
   provider?: ProviderName;
@@ -136,6 +328,7 @@ interface StartSessionBody {
 
 interface CreateSessionBody {
   mode?: PermissionMode;
+  planMode?: boolean;
   model?: ModelOption;
   thinking?: ThinkingOption;
   provider?: ProviderName;
@@ -501,13 +694,14 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
           metadataProvider ??
           process?.provider ??
           project.provider,
-        model: sessionSummary?.model,
+        model: process?.resolvedModel ?? sessionSummary?.model,
         originator: sessionSummary?.originator,
         cliVersion: sessionSummary?.cliVersion,
         source: sessionSummary?.source,
         approvalPolicy: sessionSummary?.approvalPolicy,
         sandboxPolicy: sessionSummary?.sandboxPolicy,
         contextUsage: sessionSummary?.contextUsage,
+        codexRateLimits: sessionSummary?.codexRateLimits,
         customTitle: metadata?.customTitle,
         isArchived: metadata?.isArchived,
         isStarred: metadata?.isStarred,
@@ -769,11 +963,12 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
         ...session,
         ownership,
         contextUsage,
+        codexRateLimits: session.codexRateLimits,
         customTitle: metadata?.customTitle,
         isArchived: metadata?.isArchived,
         isStarred: metadata?.isStarred,
-        // Model comes from the session reader (extracted from JSONL)
-        model: session.model,
+        // Active processes may already have switched models before JSONL catches up.
+        model: process?.resolvedModel ?? session.model,
         lastSeenAt,
         hasUnread,
       },
@@ -854,6 +1049,7 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
         thinking,
         effort,
         providerName: body.provider,
+        planMode: body.planMode,
         executor,
         globalInstructions,
         permissions: body.permissions,
@@ -887,6 +1083,16 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
           executor,
         );
       }
+    }
+
+    const effectiveProvider = body.provider ?? project.provider;
+    if (effectiveProvider === "codex") {
+      await syncCodexDesktopProjectlessThread({
+        sessionId: result.sessionId,
+        projectPath: project.path,
+        title: createCodexThreadTitle(body.message, project.path),
+        initialPrompt: body.message,
+      });
     }
 
     return c.json({
@@ -980,6 +1186,15 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
           executor,
         );
       }
+    }
+
+    const effectiveProvider = body.provider ?? project.provider;
+    if (effectiveProvider === "codex") {
+      await syncCodexDesktopProjectlessThread({
+        sessionId: result.sessionId,
+        projectPath: project.path,
+        title: createCodexThreadTitle(undefined, project.path),
+      });
     }
 
     return c.json({
@@ -1116,6 +1331,7 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
         model,
         thinking,
         effort,
+        planMode: body.planMode,
         providerName,
         executor,
         globalInstructions,
@@ -1140,6 +1356,113 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
       processId: result.id,
       permissionMode: result.permissionMode,
       modeVersion: result.modeVersion,
+    });
+  });
+
+  // POST /api/projects/:projectId/sessions/:sessionId/compact
+  // 对活动中的线程直接压缩；空闲线程先恢复，再压缩。
+  routes.post("/projects/:projectId/sessions/:sessionId/compact", async (c) => {
+    const projectId = c.req.param("projectId");
+    const sessionId = c.req.param("sessionId");
+
+    if (!isUrlProjectId(projectId)) {
+      return c.json({ error: "Invalid project ID format" }, 400);
+    }
+
+    const project = await deps.scanner.getOrCreateProject(projectId);
+    if (!project) {
+      return c.json({ error: "Project not found or path does not exist" }, 404);
+    }
+
+    const readSummary = async () => {
+      const metadataProvider = deps.sessionMetadataService?.getProvider(
+        sessionId,
+      ) as ProviderName | undefined;
+      const result = await findSessionSummaryAcrossProviders(
+        project,
+        sessionId,
+        projectId as UrlProjectId,
+        {
+          readerFactory: deps.readerFactory,
+          codexSessionsDir: deps.codexSessionsDir,
+          codexReaderFactory: deps.codexReaderFactory,
+          geminiSessionsDir: deps.geminiSessionsDir,
+          geminiReaderFactory: deps.geminiReaderFactory,
+          geminiHashToCwd: deps.geminiScanner?.getHashToCwd(),
+        },
+        metadataProvider,
+      );
+      return result?.summary ?? null;
+    };
+
+    const beforeCompactSummary = await readSummary();
+    let process = deps.supervisor.getProcessForSession(sessionId);
+    if (!process) {
+      const metadataProvider = deps.sessionMetadataService?.getProvider(
+        sessionId,
+      ) as ProviderName | undefined;
+      const sessionSummary = beforeCompactSummary;
+      const providerName =
+        metadataProvider ?? sessionSummary?.provider ?? project.provider;
+      if (providerName !== "codex") {
+        return c.json(
+          { error: "Context compaction is only supported for Codex sessions" },
+          400,
+        );
+      }
+
+      const parsedSavedExecutor = parseOptionalExecutor(
+        deps.sessionMetadataService?.getExecutor(sessionId),
+      );
+      if (parsedSavedExecutor.error) {
+        return c.json({ error: parsedSavedExecutor.error }, 400);
+      }
+
+      process = await deps.supervisor.resumeSessionWithoutMessage(
+        sessionId,
+        project.path,
+        undefined,
+        {
+          providerName,
+          model: sessionSummary?.model,
+          executor: parsedSavedExecutor.executor,
+        },
+      );
+    }
+
+    const success = await process.compact();
+    if (!success) {
+      return c.json(
+        { error: "Context compaction not supported for this session" },
+        400,
+      );
+    }
+
+    // app-server 的压缩请求会先返回，落盘稍后完成。
+    // 这里等到摘要文件出现新用量后再向前端返回。
+    let afterCompactSummary = beforeCompactSummary;
+    for (let attempt = 0; attempt < 30; attempt += 1) {
+      await sleep(500);
+      afterCompactSummary = await readSummary();
+      const beforeTokens = beforeCompactSummary?.contextUsage?.inputTokens;
+      const afterTokens = afterCompactSummary?.contextUsage?.inputTokens;
+      if (
+        afterCompactSummary &&
+        afterCompactSummary.updatedAt !== beforeCompactSummary?.updatedAt &&
+        (beforeTokens === undefined ||
+          afterTokens === undefined ||
+          afterTokens < beforeTokens)
+      ) {
+        break;
+      }
+    }
+
+    process.finishControlOperation();
+
+    return c.json({
+      success: true,
+      processId: process.id,
+      contextUsage: afterCompactSummary?.contextUsage,
     });
   });
 
@@ -1228,6 +1551,7 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
         model,
         thinking,
         effort,
+        planMode: body.planMode,
         providerName: metadataProvider ?? body.provider ?? process.provider,
         executor:
           executor ??

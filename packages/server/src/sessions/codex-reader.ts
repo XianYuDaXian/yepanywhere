@@ -31,6 +31,7 @@ import {
 } from "@yep-anywhere/shared";
 import { canonicalizeProjectPath } from "../projects/paths.js";
 import type {
+  CodexRateLimits,
   ContentBlock,
   ContextUsage,
   Message,
@@ -158,6 +159,7 @@ export class CodexSessionReader implements ISessionReader {
       const provider = this.determineProvider(metaEntry, model);
       const turnContext = this.extractTurnContext(entries);
       const contextUsage = this.extractContextUsage(entries, model, provider);
+      const codexRateLimits = this.extractRateLimits(entries);
 
       // Skip sessions with no actual conversation messages
       if (messageCount === 0) return null;
@@ -172,6 +174,7 @@ export class CodexSessionReader implements ISessionReader {
         messageCount,
         ownership: { owner: "none" },
         contextUsage,
+        codexRateLimits,
         provider,
         model,
         originator: metaEntry.payload.originator,
@@ -545,11 +548,13 @@ export class CodexSessionReader implements ISessionReader {
       ) {
         const info = entry.payload.info;
         if (info?.last_token_usage || info?.total_token_usage) {
-          // Codex context meter is based on the latest turn's input_tokens,
-          // not cumulative totals and not cached-input totals.
+          // 普通回合使用最新一轮的 input_tokens。
+          // 压缩完成后的记录会把 input_tokens 置为 0，
+          // 此时 total_tokens 才是新的背景占用。
           const usage = info.last_token_usage ?? info.total_token_usage;
           if (!usage) continue;
-          const inputTokens = usage.input_tokens;
+          const inputTokens =
+            usage.input_tokens > 0 ? usage.input_tokens : usage.total_tokens;
 
           if (inputTokens === 0) continue;
 
@@ -565,6 +570,40 @@ export class CodexSessionReader implements ISessionReader {
 
           return { inputTokens, percentage, contextWindow };
         }
+      }
+    }
+
+    return undefined;
+  }
+
+  private extractRateLimits(
+    entries: CodexSessionEntry[],
+  ): CodexRateLimits | undefined {
+    for (let i = entries.length - 1; i >= 0; i--) {
+      const entry = entries[i];
+      if (
+        entry &&
+        entry.type === "event_msg" &&
+        entry.payload.type === "token_count" &&
+        entry.payload.rate_limits
+      ) {
+        const { primary, secondary } = entry.payload.rate_limits;
+        return {
+          primary: primary
+            ? {
+                usedPercent: primary.used_percent,
+                windowMinutes: primary.window_minutes,
+                resetsAt: primary.resets_at,
+              }
+            : undefined,
+          secondary: secondary
+            ? {
+                usedPercent: secondary.used_percent,
+                windowMinutes: secondary.window_minutes,
+                resetsAt: secondary.resets_at,
+              }
+            : secondary,
+        };
       }
     }
 

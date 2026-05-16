@@ -273,6 +273,7 @@ export function useGlobalSessions(options: UseGlobalSessionsOptions = {}) {
           (p) => p.id === event.session.projectId,
         );
         const projectName = project?.name ?? event.session.projectId;
+        const projectPath = project?.path;
 
         // Convert SessionSummary to GlobalSessionItem
         const globalSession: GlobalSessionItem = {
@@ -284,6 +285,7 @@ export function useGlobalSessions(options: UseGlobalSessionsOptions = {}) {
           provider: event.session.provider,
           projectId: event.session.projectId,
           projectName,
+          projectPath,
           ownership: event.session.ownership,
           pendingInputType: event.session.pendingInputType,
           activity: event.session.activity,

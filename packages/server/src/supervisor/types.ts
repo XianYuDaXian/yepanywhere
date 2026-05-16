@@ -1,5 +1,6 @@
 import type {
   AgentActivity,
+  CodexRateLimits,
   ContextUsage,
   EffortLevel,
   InputRequest,
@@ -22,6 +23,7 @@ export { decodeProjectId, encodeProjectId } from "../projects/paths.js";
 // Re-export shared types used by server
 export type {
   AgentActivity,
+  CodexRateLimits,
   ContextUsage,
   InputRequest,
   PendingInputType,
@@ -90,6 +92,8 @@ export interface SessionSummary {
   isStarred?: boolean;
   /** Context usage from the last assistant message */
   contextUsage?: ContextUsage;
+  /** Codex account rate limits from the latest token_count event */
+  codexRateLimits?: CodexRateLimits;
   /** AI provider used for this session */
   provider: ProviderName;
   /** Model used for this session (extracted from JSONL, e.g. "claude-opus-4-5-20251101") */

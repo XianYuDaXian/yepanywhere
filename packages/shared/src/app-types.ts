@@ -182,6 +182,17 @@ export interface ContextUsage {
   cacheCreationTokens?: number;
 }
 
+export interface CodexRateLimitWindow {
+  usedPercent: number;
+  windowMinutes: number;
+  resetsAt: number;
+}
+
+export interface CodexRateLimits {
+  primary?: CodexRateLimitWindow;
+  secondary?: CodexRateLimitWindow | null;
+}
+
 // =============================================================================
 // Model Context Window Mapping
 // =============================================================================
@@ -355,6 +366,7 @@ export interface AppSessionSummary {
   isArchived?: boolean;
   isStarred?: boolean;
   contextUsage?: ContextUsage;
+  codexRateLimits?: CodexRateLimits;
   /** SSH host alias for remote execution (undefined = local) */
   executor?: string;
   /** Launcher identifier from session metadata (e.g. "Codex Desktop", "yep-anywhere") */

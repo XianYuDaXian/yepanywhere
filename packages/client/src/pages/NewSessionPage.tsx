@@ -1,4 +1,6 @@
 import { useSearchParams } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { api } from "../api/client";
 import { NewSessionForm } from "../components/NewSessionForm";
 import { PageHeader } from "../components/PageHeader";
 import { ProjectSelector } from "../components/ProjectSelector";
@@ -12,8 +14,14 @@ export function NewSessionPage() {
   const { t } = useI18n();
   const [searchParams, setSearchParams] = useSearchParams();
   const projectId = searchParams.get("projectId");
+  const workspaceParam = searchParams.get("workspace");
+  const workspaceMode =
+    workspaceParam === "chat" ? "chat" : ("project" as const);
   const { openSidebar, isWideScreen, toggleSidebar, isSidebarCollapsed } =
     useNavigationLayout();
+  const [chatProjectId, setChatProjectId] = useState<string | null>(null);
+  const [chatProjectLoading, setChatProjectLoading] = useState(true);
+  const [chatProjectError, setChatProjectError] = useState<Error | null>(null);
 
   // Get all projects to find default if no projectId specified
   const { projects, loading: projectsLoading } = useProjects();
@@ -27,23 +35,67 @@ export function NewSessionPage() {
     error,
   } = useProject(effectiveProjectId ?? undefined);
 
+  useEffect(() => {
+    let cancelled = false;
+    setChatProjectLoading(true);
+    setChatProjectError(null);
+    api
+      .getDefaultChatProject()
+      .then((data) => {
+        if (!cancelled) {
+          setChatProjectId(data.project.id);
+          setChatProjectLoading(false);
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setChatProjectError(
+            err instanceof Error ? err : new Error(String(err)),
+          );
+          setChatProjectLoading(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   // Update browser tab title (must be called unconditionally before any early returns)
   useDocumentTitle(project?.name, t("newSessionTitle"));
 
   // Callback to update projectId in URL without navigation
   const handleProjectChange = (newProjectId: string) => {
-    setSearchParams({ projectId: newProjectId }, { replace: true });
+    const nextParams = new URLSearchParams(searchParams);
+    nextParams.set("projectId", newProjectId);
+    setSearchParams(nextParams, { replace: true });
   };
 
-  const loading = projectLoading || projectsLoading;
+  const handleWorkspaceModeChange = (newMode: "chat" | "project") => {
+    const nextParams = new URLSearchParams(searchParams);
+    nextParams.set("workspace", newMode);
+    if (effectiveProjectId) {
+      nextParams.set("projectId", effectiveProjectId);
+    }
+    setSearchParams(nextParams, { replace: true });
+  };
+
+  const loading =
+    projectsLoading ||
+    chatProjectLoading ||
+    (workspaceMode === "project" ? projectLoading : false);
 
   // Guard against missing projectId (no projects available)
-  if (!effectiveProjectId && !projectsLoading && projects.length === 0) {
+  if (
+    workspaceMode === "project" &&
+    !effectiveProjectId &&
+    !projectsLoading &&
+    projects.length === 0
+  ) {
     return <div className="error">{t("newSessionNoProjects")}</div>;
   }
 
   // Render loading/error states
-  if (loading || error) {
+  if (loading || error || chatProjectError) {
     return (
       <div
         className={
@@ -70,7 +122,8 @@ export function NewSessionPage() {
                 <div className="loading">{t("newSessionLoading")}</div>
               ) : (
                 <div className="error">
-                  {t("newSessionErrorPrefix")} {error?.message}
+                  {t("newSessionErrorPrefix")}{" "}
+                  {(error ?? chatProjectError)?.message}
                 </div>
               )}
             </div>
@@ -94,7 +147,7 @@ export function NewSessionPage() {
         <PageHeader
           title={project?.name ?? t("newSessionTitle")}
           titleElement={
-            effectiveProjectId ? (
+            workspaceMode === "project" && effectiveProjectId ? (
               <ProjectSelector
                 currentProjectId={effectiveProjectId}
                 currentProjectName={project?.name}
@@ -110,9 +163,12 @@ export function NewSessionPage() {
 
         <main className="page-scroll-container">
           <div className="page-content-inner">
-            {effectiveProjectId && (
-              <NewSessionForm projectId={effectiveProjectId} />
-            )}
+            <NewSessionForm
+              projectId={effectiveProjectId ?? null}
+              chatProjectId={chatProjectId}
+              workspaceMode={workspaceMode}
+              onWorkspaceModeChange={handleWorkspaceModeChange}
+            />
           </div>
         </main>
       </div>

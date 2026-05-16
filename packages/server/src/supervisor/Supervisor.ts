@@ -84,6 +84,8 @@ export interface ModelSettings {
   globalInstructions?: string;
   /** Permission rules for tool filtering (deny/allow patterns) */
   permissions?: PermissionRules;
+  /** Codex planning behavior, independent from permission mode. */
+  planMode?: boolean;
 }
 
 /** Error response when queue is full */
@@ -352,6 +354,7 @@ export class Supervisor {
       cwd: projectPath,
       // No initialMessage - queue will block until one is pushed
       permissionMode: effectiveMode,
+      planMode: modelSettings?.planMode,
       model: modelSettings?.model,
       thinking: modelSettings?.thinking,
       effort: modelSettings?.effort,
@@ -452,6 +455,7 @@ export class Supervisor {
       initialMessage: messageWithUuid,
       resumeSessionId,
       permissionMode: effectiveMode,
+      planMode: modelSettings?.planMode,
       model: modelSettings?.model,
       thinking: modelSettings?.thinking,
       effort: modelSettings?.effort,
@@ -535,6 +539,7 @@ export class Supervisor {
     permissionMode?: PermissionMode,
     modelSettings?: ModelSettings,
     provider?: AgentProvider,
+    resumeSessionId?: string,
   ): Promise<Process> {
     const activeProvider = provider ?? this.provider;
     if (!activeProvider) {
@@ -548,6 +553,7 @@ export class Supervisor {
     const result = await activeProvider.startSession({
       cwd: projectPath,
       // No initialMessage - queue will block until one is pushed
+      resumeSessionId,
       permissionMode: effectiveMode,
       model: modelSettings?.model,
       thinking: modelSettings?.thinking,
@@ -574,9 +580,12 @@ export class Supervisor {
       supportedModels,
       supportedCommands,
       setModel,
+      compact,
+      setPermissionMode,
+      setPlanMode,
     } = result;
 
-    const tempSessionId = randomUUID();
+    const tempSessionId = resumeSessionId ?? randomUUID();
     const options: ProcessConstructorOptions = {
       projectPath,
       projectId,
@@ -595,6 +604,9 @@ export class Supervisor {
       supportedModelsFn: supportedModels,
       supportedCommandsFn: supportedCommands,
       setModelFn: setModel,
+      compactFn: compact,
+      setPermissionModeFn: setPermissionMode,
+      setPlanModeFn: setPlanMode,
       permissionMode: effectiveMode,
       provider: activeProvider.name,
       model: modelSettings?.model,
@@ -608,10 +620,12 @@ export class Supervisor {
     processHolder.process = process;
 
     // Wait for the real session ID from the provider
-    await process.waitForSessionId();
+    if (!resumeSessionId) {
+      await process.waitForSessionId();
+    }
 
     // Register as a new session
-    this.registerProcess(process, true);
+    this.registerProcess(process, !resumeSessionId);
 
     return process;
   }
@@ -675,6 +689,9 @@ export class Supervisor {
       supportedModels,
       supportedCommands,
       setModel,
+      compact,
+      setPermissionMode,
+      setPlanMode,
     } = result;
 
     const options: ProcessConstructorOptions = {
@@ -695,6 +712,9 @@ export class Supervisor {
       supportedModelsFn: supportedModels,
       supportedCommandsFn: supportedCommands,
       setModelFn: setModel,
+      compactFn: compact,
+      setPermissionModeFn: setPermissionMode,
+      setPlanModeFn: setPlanMode,
       permissionMode: effectiveMode,
       provider: activeProvider.name,
       model: modelSettings?.model,
@@ -837,6 +857,9 @@ export class Supervisor {
           // Update permission mode if specified
           if (permissionMode) {
             existingProcess.setPermissionMode(permissionMode);
+          }
+          if (modelSettings?.planMode !== undefined) {
+            existingProcess.setPlanMode(modelSettings.planMode);
           }
           // Queue message to existing process (if we didn't fall through to restart)
           if (!existingProcess.isTerminated) {
@@ -1045,6 +1068,9 @@ export class Supervisor {
     if (permissionMode) {
       process.setPermissionMode(permissionMode);
     }
+    if (modelSettings?.planMode !== undefined) {
+      process.setPlanMode(modelSettings.planMode);
+    }
 
     const result = process.queueMessage(message);
     if (result.success) {
@@ -1052,6 +1078,45 @@ export class Supervisor {
     }
 
     return { success: false, error: result.error ?? "Failed to queue message" };
+  }
+
+  /**
+   * 恢复已有会话，但不发送新消息。
+   * 这用于先重新接入线程，再执行压缩这类会话级操作。
+   */
+  async resumeSessionWithoutMessage(
+    sessionId: string,
+    projectPath: string,
+    permissionMode?: PermissionMode,
+    modelSettings?: ModelSettings,
+  ): Promise<Process> {
+    const existingProcess = this.getProcessForSession(sessionId);
+    if (existingProcess && !existingProcess.isTerminated) {
+      if (permissionMode) {
+        existingProcess.setPermissionMode(permissionMode);
+      }
+      return existingProcess;
+    }
+
+    const projectId = encodeProjectId(projectPath);
+    const provider = modelSettings?.providerName
+      ? getProvider(modelSettings.providerName)
+      : modelSettings?.executor
+        ? getProvider("claude")
+        : this.provider;
+
+    if (!provider) {
+      throw new Error("provider is not available");
+    }
+
+    return this.createProviderSession(
+      projectPath,
+      projectId,
+      permissionMode,
+      modelSettings,
+      provider,
+      sessionId,
+    );
   }
 
   getAllProcesses(): Process[] {
@@ -1482,6 +1547,8 @@ export class Supervisor {
 
     const summary = await this.onSessionSummary(sessionId, projectId);
     if (!summary) return;
+    const processId = this.sessionToProcess.get(sessionId);
+    const process = processId ? this.processes.get(processId) : undefined;
 
     const event: SessionUpdatedEvent = {
       type: "session-updated",
@@ -1491,7 +1558,7 @@ export class Supervisor {
       messageCount: summary.messageCount,
       updatedAt: summary.updatedAt,
       contextUsage: summary.contextUsage,
-      model: summary.model,
+      model: process?.resolvedModel ?? summary.model,
       timestamp: new Date().toISOString(),
     };
     this.eventBus.emit(event);

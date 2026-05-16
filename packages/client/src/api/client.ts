@@ -2,6 +2,7 @@ import type {
   AgentActivity,
   BrowserProfilesResponse,
   ConnectionsResponse,
+  CodexRateLimits,
   DeviceInfo,
   EnrichedRecentEntry,
   FileContentResponse,
@@ -73,6 +74,7 @@ export interface GlobalSessionItem {
   provider: ProviderName;
   projectId: string;
   projectName: string;
+  projectPath?: string;
   ownership: SessionStatus;
   pendingInputType?: PendingInputType;
   activity?: AgentActivity;
@@ -82,6 +84,12 @@ export interface GlobalSessionItem {
   isStarred?: boolean;
   /** SSH host alias for remote execution (undefined = local) */
   executor?: string;
+}
+
+export interface CodexSkillInfo {
+  name: string;
+  path: string;
+  scope: "project" | "user";
 }
 
 /** Stats about all sessions (computed during full scan on server) */
@@ -100,6 +108,7 @@ export interface GlobalSessionStats {
 export interface ProjectOption {
   id: string;
   name: string;
+  path?: string;
 }
 
 /**
@@ -116,6 +125,7 @@ export interface GlobalSessionsResponse {
 
 export interface SessionOptions {
   mode?: PermissionMode;
+  planMode?: boolean;
   /** Model ID (e.g., "sonnet", "opus", "qwen2.5-coder:0.5b") */
   model?: string;
   thinking?: ThinkingOption;
@@ -356,6 +366,11 @@ export const api = {
   // Provider API
   getProviders: () => fetchJSON<{ providers: ProviderInfo[] }>("/providers"),
 
+  getCodexRateLimits: () =>
+    fetchJSON<{ rateLimits: CodexRateLimits | null }>(
+      "/providers/codex/rate-limits",
+    ),
+
   getProjects: () => fetchJSON<{ projects: Project[] }>("/projects"),
 
   /**
@@ -371,6 +386,20 @@ export const api = {
 
   getProject: (projectId: string) =>
     fetchJSON<{ project: Project }>(`/projects/${projectId}`),
+
+  getDefaultChatProject: () =>
+    fetchJSON<{ project: Project }>("/projects/chat-default"),
+
+  getChatProjectForMessage: (message: string) =>
+    fetchJSON<{ project: Project }>("/projects/chat-project", {
+      method: "POST",
+      body: JSON.stringify({ message }),
+    }),
+
+  getCodexSkills: (projectId: string) =>
+    fetchJSON<{ skills: CodexSkillInfo[] }>(
+      `/projects/${projectId}/codex/skills`,
+    ),
 
   getSession: (
     projectId: string,
@@ -407,6 +436,16 @@ export const api = {
       slashCommands?: SlashCommand[] | null;
     }>(`/projects/${projectId}/sessions/${sessionId}/metadata`),
 
+  compactSession: (projectId: string, sessionId: string) =>
+    fetchJSON<{
+      success: boolean;
+      processId: string;
+      contextUsage?: { inputTokens: number; percentage: number };
+    }>(
+      `/projects/${projectId}/sessions/${sessionId}/compact`,
+      { method: "POST" },
+    ),
+
   /**
    * Get agent session content for lazy-loading completed Tasks.
    * Used to fetch subagent messages on demand when expanding a Task.
@@ -441,6 +480,7 @@ export const api = {
       body: JSON.stringify({
         message,
         mode: options?.mode,
+        planMode: options?.planMode,
         model: options?.model,
         thinking: options?.thinking,
         provider: options?.provider,
@@ -463,6 +503,7 @@ export const api = {
       method: "POST",
       body: JSON.stringify({
         mode: options?.mode,
+        planMode: options?.planMode,
         model: options?.model,
         thinking: options?.thinking,
         provider: options?.provider,
@@ -487,6 +528,7 @@ export const api = {
       body: JSON.stringify({
         message,
         mode: options?.mode,
+        planMode: options?.planMode,
         model: options?.model,
         thinking: options?.thinking,
         provider: options?.provider,
@@ -500,6 +542,7 @@ export const api = {
     sessionId: string,
     message: string,
     mode?: PermissionMode,
+    planMode?: boolean,
     attachments?: UploadedFile[],
     tempId?: string,
     thinking?: ThinkingOption,
@@ -515,6 +558,7 @@ export const api = {
       body: JSON.stringify({
         message,
         mode,
+        planMode,
         attachments,
         tempId,
         thinking,

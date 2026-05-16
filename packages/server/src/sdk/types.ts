@@ -125,6 +125,8 @@ export interface StartSessionOptions {
   initialMessage?: UserMessage;
   resumeSessionId?: string;
   permissionMode?: PermissionMode;
+  /** Whether the provider should use planning collaboration behavior. */
+  planMode?: boolean;
   /** Model to use (e.g., "sonnet", "opus", "haiku"). undefined = use CLI default */
   model?: string;
   /** Thinking configuration (undefined = thinking disabled) */
@@ -178,6 +180,8 @@ export interface StartSessionResult {
    * Only supported by Claude SDK 0.2.7+.
    */
   setModel?: (model?: string) => Promise<void>;
+  /** Change provider planning behavior without changing permission mode. */
+  setPlanMode?: (enabled: boolean) => Promise<void> | void;
 }
 
 export interface RealClaudeSDKInterface {

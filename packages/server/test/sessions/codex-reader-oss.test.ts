@@ -276,6 +276,79 @@ describe("CodexSessionReader - OSS Support", () => {
     expect(summary?.contextUsage?.percentage).toBe(33);
   });
 
+  it("uses last_token_usage total_tokens after compaction when input_tokens is zero", async () => {
+    const sessionId = "context-after-compaction";
+    await createSessionFile(sessionId, "openai", "gpt-5.5", undefined, {
+      totalInputTokens: 248_665,
+      totalCachedInputTokens: 122_240,
+      lastInputTokens: 0,
+      lastCachedInputTokens: 0,
+      modelContextWindow: 258_400,
+    });
+
+    const sessionPath = join(testDir, `${sessionId}.jsonl`);
+    const now = new Date().toISOString();
+    await writeFile(
+      sessionPath,
+      `${[
+        JSON.stringify({
+          type: "session_meta",
+          timestamp: now,
+          payload: {
+            id: sessionId,
+            cwd: "/test/project",
+            timestamp: now,
+            model_provider: "openai",
+          },
+        }),
+        JSON.stringify({
+          type: "turn_context",
+          timestamp: now,
+          payload: { model: "gpt-5.5" },
+        }),
+        JSON.stringify({
+          type: "event_msg",
+          timestamp: now,
+          payload: {
+            type: "user_message",
+            message: "Hello world",
+          },
+        }),
+        JSON.stringify({
+          type: "event_msg",
+          timestamp: now,
+          payload: {
+            type: "token_count",
+            info: {
+              total_token_usage: {
+                input_tokens: 248_665,
+                cached_input_tokens: 122_240,
+                output_tokens: 1_454,
+                total_tokens: 250_119,
+              },
+              last_token_usage: {
+                input_tokens: 0,
+                cached_input_tokens: 0,
+                output_tokens: 0,
+                total_tokens: 4_108,
+              },
+              model_context_window: 258_400,
+            },
+          },
+        }),
+      ].join("\n")}\n`,
+    );
+
+    const summary = await reader.getSessionSummary(
+      sessionId,
+      "test-project" as UrlProjectId,
+    );
+
+    expect(summary?.contextUsage?.inputTokens).toBe(4_108);
+    expect(summary?.contextUsage?.percentage).toBe(2);
+    expect(summary?.contextUsage?.contextWindow).toBe(258_400);
+  });
+
   it("excludes developer messages from messageCount", async () => {
     const sessionId = "developer-filter";
     const now = new Date().toISOString();

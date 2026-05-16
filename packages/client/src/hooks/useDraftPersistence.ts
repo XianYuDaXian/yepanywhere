@@ -9,6 +9,10 @@ export interface DraftControls {
   clearDraft: () => void;
   /** Restore from localStorage (call on failure) */
   restoreFromStorage: () => void;
+  /** 读取当前草稿 */
+  getDraft: () => string;
+  /** 直接写入当前草稿 */
+  setDraft: (value: string) => void;
 }
 
 /** Save a value to localStorage immediately */
@@ -44,6 +48,7 @@ export function useDraftPersistence(
 
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const keyRef = useRef(key);
+  const valueRef = useRef(value);
   // Track pending value so we can flush on unmount/beforeunload
   const pendingValueRef = useRef<string | null>(null);
 
@@ -51,6 +56,10 @@ export function useDraftPersistence(
   useEffect(() => {
     keyRef.current = key;
   }, [key]);
+
+  useEffect(() => {
+    valueRef.current = value;
+  }, [value]);
 
   // Restore from localStorage when key changes
   useEffect(() => {
@@ -138,6 +147,19 @@ export function useDraftPersistence(
     }
   }, []);
 
+  const getDraft = useCallback(() => valueRef.current, []);
+
+  const setDraft = useCallback((newValue: string) => {
+    setValueInternal(newValue);
+    pendingValueRef.current = newValue;
+    if (timeoutRef.current) {
+      clearTimeout(timeoutRef.current);
+      timeoutRef.current = null;
+    }
+    saveToStorage(keyRef.current, newValue);
+    pendingValueRef.current = null;
+  }, []);
+
   // Flush pending and cleanup on unmount
   useEffect(() => {
     return () => {
@@ -152,8 +174,14 @@ export function useDraftPersistence(
   }, []);
 
   const controls = useMemo(
-    () => ({ clearInput, clearDraft, restoreFromStorage }),
-    [clearInput, clearDraft, restoreFromStorage],
+    () => ({
+      clearInput,
+      clearDraft,
+      restoreFromStorage,
+      getDraft,
+      setDraft,
+    }),
+    [clearInput, clearDraft, restoreFromStorage, getDraft, setDraft],
   );
 
   return [value, setValue, controls];

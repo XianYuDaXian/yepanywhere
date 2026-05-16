@@ -1,4 +1,6 @@
+import { access, mkdir, readdir } from "node:fs/promises";
 import { homedir } from "node:os";
+import { basename, dirname, join } from "node:path";
 import { isUrlProjectId, toUrlProjectId } from "@yep-anywhere/shared";
 import { Hono } from "hono";
 import type { SessionIndexService } from "../indexes/index.js";
@@ -7,7 +9,10 @@ import type {
   SessionMetadataService,
 } from "../metadata/index.js";
 import type { NotificationService } from "../notifications/index.js";
-import type { CodexSessionScanner } from "../projects/codex-scanner.js";
+import {
+  getDefaultCodexHomeDir,
+  type CodexSessionScanner,
+} from "../projects/codex-scanner.js";
 import type { GeminiSessionScanner } from "../projects/gemini-scanner.js";
 import { canonicalizeProjectPath, isAbsolutePath } from "../projects/paths.js";
 import type { ProjectScanner } from "../projects/scanner.js";
@@ -49,9 +54,111 @@ export interface ProjectsDeps {
   geminiReaderFactory?: (projectPath: string) => GeminiSessionReader;
 }
 
+function getCodexChatProjectPath(): string {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const day = String(now.getDate()).padStart(2, "0");
+  return join(homedir(), "Documents", "Codex", `${year}-${month}-${day}`);
+}
+
+function createChatProjectSlug(message: string): string {
+  const normalized = message
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .find((line) => line.length > 0);
+  const source = normalized ?? "chat";
+
+  const urlMatch = source.match(/https?:\/\/[^\s)]+/i);
+  const candidate = urlMatch
+    ? (() => {
+        try {
+          const url = new URL(urlMatch[0]);
+          return `${url.hostname}${url.pathname}`.replace(/\/+/g, "-");
+        } catch {
+          return source;
+        }
+      })()
+    : source;
+
+  const slug = candidate
+    .normalize("NFKC")
+    .replace(/[`"'“”‘’]/g, "")
+    .replace(/[<>:\\/?*|#%&{}[\]!@$^+=;,]+/g, " ")
+    .replace(/\s+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 48);
+
+  return slug || "chat";
+}
+
+async function getUniqueChatProjectPath(message: string): Promise<string> {
+  const baseDir = getCodexChatProjectPath();
+  await mkdir(baseDir, { recursive: true });
+
+  const slug = createChatProjectSlug(message);
+  let nextPath = join(baseDir, slug);
+  let suffix = 2;
+
+  while (true) {
+    try {
+      await access(nextPath);
+      nextPath = join(baseDir, `${slug}-${suffix}`);
+      suffix += 1;
+    } catch {
+      return nextPath;
+    }
+  }
+}
+
 interface ProjectActivityCounts {
   activeOwnedCount: number;
   activeExternalCount: number;
+}
+
+interface CodexSkillInfo {
+  name: string;
+  path: string;
+  scope: "project" | "user";
+}
+
+async function listSkillDirectories(
+  rootDir: string,
+  scope: "project" | "user",
+): Promise<CodexSkillInfo[]> {
+  try {
+    await access(rootDir);
+  } catch {
+    return [];
+  }
+
+  const skills: CodexSkillInfo[] = [];
+  const pendingDirs = [rootDir];
+
+  while (pendingDirs.length > 0) {
+    const currentDir = pendingDirs.pop();
+    if (!currentDir) continue;
+
+    const entries = await readdir(currentDir, { withFileTypes: true });
+    for (const entry of entries) {
+      const entryPath = join(currentDir, entry.name);
+      if (entry.isDirectory()) {
+        pendingDirs.push(entryPath);
+        continue;
+      }
+      if (!entry.isFile() || entry.name !== "SKILL.md") {
+        continue;
+      }
+      skills.push({
+        name: basename(dirname(entryPath)),
+        path: entryPath,
+        scope,
+      });
+    }
+  }
+
+  return skills;
 }
 
 /**
@@ -97,6 +204,46 @@ async function getProjectActivityCounts(
 
 export function createProjectsRoutes(deps: ProjectsDeps): Hono {
   const routes = new Hono();
+
+  routes.get("/chat-default", async (c) => {
+    const chatProjectPath = getCodexChatProjectPath();
+    await mkdir(chatProjectPath, { recursive: true });
+    const chatProjectId = toUrlProjectId(chatProjectPath);
+    const project = await deps.scanner.getOrCreateProject(
+      chatProjectId,
+      "codex",
+    );
+    if (!project) {
+      return c.json({ error: "Chat project not found" }, 404);
+    }
+    return c.json({ project });
+  });
+
+  routes.post("/chat-project", async (c) => {
+    let body: { message?: string };
+    try {
+      body = await c.req.json<{ message?: string }>();
+    } catch {
+      return c.json({ error: "Invalid JSON body" }, 400);
+    }
+
+    const message = body.message?.trim();
+    if (!message) {
+      return c.json({ error: "Message is required" }, 400);
+    }
+
+    const chatProjectPath = await getUniqueChatProjectPath(message);
+    await mkdir(chatProjectPath, { recursive: true });
+    const chatProjectId = toUrlProjectId(chatProjectPath);
+    const project = await deps.scanner.getOrCreateProject(
+      chatProjectId,
+      "codex",
+    );
+    if (!project) {
+      return c.json({ error: "Chat project not found" }, 404);
+    }
+    return c.json({ project });
+  });
 
   /**
    * Get owned sessions for a project that might not be in the file list yet.
@@ -269,6 +416,43 @@ export function createProjectsRoutes(deps: ProjectsDeps): Hono {
     }
 
     return c.json({ project });
+  });
+
+  routes.get("/:projectId/codex/skills", async (c) => {
+    const projectId = c.req.param("projectId");
+
+    if (!isUrlProjectId(projectId)) {
+      return c.json({ error: "Invalid project ID format" }, 400);
+    }
+
+    const project = await deps.scanner.getOrCreateProject(projectId);
+    if (!project) {
+      return c.json({ error: "Project not found" }, 404);
+    }
+
+    const codexHome = getDefaultCodexHomeDir();
+    const [projectCodexSkills, projectAgentSkills, userCodexSkills, userAgentSkills, pluginSkills] =
+      await Promise.all([
+        listSkillDirectories(join(project.path, ".codex", "skills"), "project"),
+        listSkillDirectories(join(project.path, ".agents", "skills"), "project"),
+        listSkillDirectories(join(codexHome, "skills"), "user"),
+        listSkillDirectories(join(homedir(), ".agents", "skills"), "user"),
+        listSkillDirectories(join(codexHome, "plugins", "cache"), "user"),
+      ]);
+
+    const projectSkills = [...projectCodexSkills, ...projectAgentSkills];
+    const userSkills = [...userCodexSkills, ...userAgentSkills, ...pluginSkills];
+
+    const deduped = new Map<string, CodexSkillInfo>();
+    for (const skill of [...userSkills, ...projectSkills]) {
+      deduped.set(skill.name, skill);
+    }
+
+    return c.json({
+      skills: [...deduped.values()].sort((a, b) =>
+        a.name.localeCompare(b.name),
+      ),
+    });
   });
 
   // POST /api/projects - Add a project by path

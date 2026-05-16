@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useI18n } from "../i18n";
 
 // Breakpoint for desktop behavior (should match CSS)
 const DESKTOP_BREAKPOINT = 769;
+const DROPDOWN_GAP_PX = 4;
 
 export interface FilterOption<T extends string> {
   value: T;
@@ -21,6 +22,7 @@ export interface FilterDropdownProps<T extends string> {
   multiSelect?: boolean; // default true
   placeholder?: string; // shown when nothing selected
   align?: "left" | "right"; // dropdown alignment, default left
+  buttonLabel?: string;
 }
 
 /**
@@ -36,12 +38,14 @@ export function FilterDropdown<T extends string>({
   multiSelect = true,
   placeholder,
   align = "left",
+  buttonLabel,
 }: FilterDropdownProps<T>) {
   const { t } = useI18n();
   const [isOpen, setIsOpen] = useState(false);
   const [isDesktop, setIsDesktop] = useState(
     () => window.innerWidth >= DESKTOP_BREAKPOINT,
   );
+  const [placement, setPlacement] = useState<"down" | "up">("down");
   const buttonRef = useRef<HTMLButtonElement>(null);
   const sheetRef = useRef<HTMLDivElement>(null);
 
@@ -128,6 +132,37 @@ export function FilterDropdown<T extends string>({
     }
   }, [isOpen]);
 
+  useLayoutEffect(() => {
+    if (!isOpen || !isDesktop) {
+      setPlacement("down");
+      return;
+    }
+
+    const updatePlacement = () => {
+      const button = buttonRef.current;
+      const dropdown = sheetRef.current;
+      if (!button || !dropdown) return;
+
+      const buttonRect = button.getBoundingClientRect();
+      const dropdownRect = dropdown.getBoundingClientRect();
+      const viewportHeight = window.innerHeight;
+      const spaceBelow = viewportHeight - buttonRect.bottom - DROPDOWN_GAP_PX;
+      const spaceAbove = buttonRect.top - DROPDOWN_GAP_PX;
+      const shouldOpenUp =
+        dropdownRect.height > spaceBelow && spaceAbove > spaceBelow;
+
+      setPlacement(shouldOpenUp ? "up" : "down");
+    };
+
+    updatePlacement();
+    window.addEventListener("resize", updatePlacement);
+    window.addEventListener("scroll", updatePlacement, true);
+    return () => {
+      window.removeEventListener("resize", updatePlacement);
+      window.removeEventListener("scroll", updatePlacement, true);
+    };
+  }, [isDesktop, isOpen, options.length, selected.length]);
+
   const handleOverlayClick = (e: React.MouseEvent) => {
     if (e.target === e.currentTarget) {
       e.preventDefault();
@@ -142,6 +177,9 @@ export function FilterDropdown<T extends string>({
       return placeholder || label;
     }
     if (!multiSelect && selected.length === 1) {
+      if (buttonLabel) {
+        return buttonLabel;
+      }
       const selectedOption = options.find((o) => o.value === selected[0]);
       return selectedOption?.label || label;
     }
@@ -251,7 +289,9 @@ export function FilterDropdown<T extends string>({
     isOpen && isDesktop ? (
       <div
         ref={sheetRef}
-        className={`filter-dropdown-dropdown ${align === "right" ? "align-right" : ""}`}
+        className={`filter-dropdown-dropdown ${
+          align === "right" ? "align-right" : ""
+        } ${placement === "up" ? "open-up" : ""}`}
         tabIndex={-1}
         aria-label={t("filterByLabel", { label })}
       >

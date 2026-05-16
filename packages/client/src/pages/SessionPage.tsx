@@ -1,11 +1,15 @@
-import type { ProviderName, UploadedFile } from "@yep-anywhere/shared";
+import type {
+  CodexRateLimits,
+  ProviderName,
+  UploadedFile,
+} from "@yep-anywhere/shared";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { api } from "../api/client";
 import { MessageInput, type UploadProgress } from "../components/MessageInput";
+import { CodexSkillModal } from "../components/CodexSkillModal";
 import { MessageInputToolbar } from "../components/MessageInputToolbar";
 import { MessageList } from "../components/MessageList";
-import { ModelSwitchModal } from "../components/ModelSwitchModal";
 import { ProcessInfoModal } from "../components/ProcessInfoModal";
 import { ProviderBadge } from "../components/ProviderBadge";
 import { QuestionAnswerPanel } from "../components/QuestionAnswerPanel";
@@ -25,7 +29,12 @@ import { useDeveloperMode } from "../hooks/useDeveloperMode";
 import { useDocumentTitle } from "../hooks/useDocumentTitle";
 import type { DraftControls } from "../hooks/useDraftPersistence";
 import { useEngagementTracking } from "../hooks/useEngagementTracking";
-import { getModelSetting, getThinkingSetting } from "../hooks/useModelSettings";
+import {
+  getModelSetting,
+  getThinkingSetting,
+  type ThinkingOption,
+  useModelSettings,
+} from "../hooks/useModelSettings";
 import { useProject } from "../hooks/useProjects";
 import { useProviders } from "../hooks/useProviders";
 import { recordSessionVisit } from "../hooks/useRecentSessions";
@@ -69,6 +78,15 @@ function SessionPageInvalidRoute() {
   return <div className="error">{t("sessionInvalidUrl")}</div>;
 }
 
+const CODEX_WEB_SLASH_COMMANDS = [
+  "model",
+  "compact",
+  "init",
+  "plan",
+  "status",
+  "skill",
+];
+
 function SessionPageContent({
   projectId,
   sessionId,
@@ -77,6 +95,12 @@ function SessionPageContent({
   sessionId: string;
 }) {
   const { t } = useI18n();
+  const {
+    thinkingMode,
+    effortLevel,
+    setThinkingMode,
+    setEffortLevel,
+  } = useModelSettings();
   const { openSidebar, isWideScreen, toggleSidebar, isSidebarCollapsed } =
     useNavigationLayout();
   const basePath = useRemoteBasePath();
@@ -142,6 +166,8 @@ function SessionPageContent({
     removePendingMessage,
     updatePendingMessage,
     deferredMessages,
+    processThinkingType,
+    processEffort,
     slashCommands,
     setSessionModel,
     sessionTools,
@@ -150,6 +176,7 @@ function SessionPageContent({
     loadingOlder,
     loadOlderMessages,
     reconnectStream,
+    refreshSession,
   } = useSession(
     projectId,
     sessionId,
@@ -176,6 +203,60 @@ function SessionPageContent({
   // Effective provider/model for immediate display before session data loads
   const effectiveProvider = session?.provider ?? initialProvider;
   const effectiveModel = session?.model ?? initialModel;
+  const [codexPlanMode, setCodexPlanMode] = useState(false);
+  const [liveCodexRateLimits, setLiveCodexRateLimits] =
+    useState<CodexRateLimits | null>(null);
+  const codexRateLimits =
+    effectiveProvider === "codex" ? liveCodexRateLimits : undefined;
+
+  useEffect(() => {
+    if (effectiveProvider !== "codex") {
+      setLiveCodexRateLimits(null);
+      return;
+    }
+
+    let cancelled = false;
+    const refreshRateLimits = async () => {
+      try {
+        const response = await api.getCodexRateLimits();
+        if (!cancelled) {
+          setLiveCodexRateLimits(response.rateLimits);
+        }
+      } catch {
+        if (!cancelled) {
+          setLiveCodexRateLimits(null);
+        }
+      }
+    };
+
+    void refreshRateLimits();
+    const intervalId = window.setInterval(refreshRateLimits, 60_000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, [effectiveProvider, processState, sessionId]);
+
+  useEffect(() => {
+    if (effectiveProvider !== "codex" || !processThinkingType) return;
+    if (processThinkingType === "disabled") {
+      setThinkingMode("off");
+      return;
+    }
+    if (processThinkingType === "adaptive") {
+      setThinkingMode(processEffort ? "on" : "auto");
+      if (processEffort) {
+        setEffortLevel(processEffort);
+      }
+    }
+  }, [
+    effectiveProvider,
+    processEffort,
+    processThinkingType,
+    setEffortLevel,
+    setThinkingMode,
+  ]);
 
   const [scrollTrigger, setScrollTrigger] = useState(0);
   const draftControlsRef = useRef<DraftControls | null>(null);
@@ -198,28 +279,39 @@ function SessionPageContent({
 
   // Inject custom client-side commands alongside SDK-discovered ones
   const allSlashCommands = useMemo(() => {
-    if (status.owner === "self") {
-      return slashCommands.includes("model")
-        ? slashCommands
-        : ["model", ...slashCommands];
+    if (status.owner !== "self") {
+      return effectiveProvider === "codex"
+        ? CODEX_WEB_SLASH_COMMANDS
+        : slashCommands;
     }
-    return slashCommands;
-  }, [slashCommands, status.owner]);
+
+    const baseCommands =
+      effectiveProvider === "codex"
+        ? slashCommands.filter((command) => command !== "reasoning")
+        : slashCommands;
+    const merged = new Set(baseCommands);
+    merged.add("model");
+
+    if (effectiveProvider === "codex") {
+      for (const command of CODEX_WEB_SLASH_COMMANDS) {
+        merged.add(command);
+      }
+    }
+
+    return [...merged];
+  }, [effectiveProvider, slashCommands, status.owner]);
 
   // Get provider capabilities based on session's provider
   const { providers } = useProviders();
   const currentProviderInfo = useMemo(() => {
-    if (!session?.provider) return null;
-    return providers.find((p) => p.name === session.provider) ?? null;
-  }, [providers, session?.provider]);
+    if (!effectiveProvider) return null;
+    return providers.find((p) => p.name === effectiveProvider) ?? null;
+  }, [effectiveProvider, providers]);
   // Default to true for backwards compatibility (except slash commands)
   const supportsPermissionMode =
     currentProviderInfo?.supportsPermissionMode ?? true;
   const supportsThinkingToggle =
     currentProviderInfo?.supportsThinkingToggle ?? true;
-  const supportsSlashCommands =
-    currentProviderInfo?.supportsSlashCommands ?? false;
-
   // Inline title editing state
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [renameValue, setRenameValue] = useState("");
@@ -297,7 +389,7 @@ function SessionPageContent({
   const [showProcessInfoModal, setShowProcessInfoModal] = useState(false);
 
   // Model switch modal state
-  const [showModelSwitchModal, setShowModelSwitchModal] = useState(false);
+  const [showSkillModal, setShowSkillModal] = useState(false);
 
   // Track user engagement to mark session as "seen"
   // Only enabled when not in external session (we own or it's idle)
@@ -372,6 +464,8 @@ function SessionPageContent({
           text,
           {
             mode: permissionMode,
+            planMode:
+              effectiveProvider === "codex" ? codexPlanMode : undefined,
             model,
             thinking,
             provider: effectiveProvider,
@@ -389,6 +483,7 @@ function SessionPageContent({
           sessionId,
           text,
           permissionMode,
+          effectiveProvider === "codex" ? codexPlanMode : undefined,
           currentAttachments.length > 0 ? currentAttachments : undefined,
           tempId,
           thinking,
@@ -419,6 +514,8 @@ function SessionPageContent({
             text,
             {
               mode: permissionMode,
+              planMode:
+                effectiveProvider === "codex" ? codexPlanMode : undefined,
               model,
               thinking,
               provider: effectiveProvider,
@@ -475,6 +572,7 @@ function SessionPageContent({
         sessionId,
         text,
         permissionMode,
+        effectiveProvider === "codex" ? codexPlanMode : undefined,
         currentAttachments.length > 0 ? currentAttachments : undefined,
         tempId,
         thinking,
@@ -500,13 +598,109 @@ function SessionPageContent({
     [setSessionModel, showToast, t],
   );
 
-  const handleCustomCommand = useCallback((command: string) => {
-    if (command === "model") {
-      setShowModelSwitchModal(true);
-      return true;
-    }
-    return false;
+  const handleModelSelect = useCallback(
+    async (model: string) => {
+      try {
+        if (status.owner === "self") {
+          await api.setProcessModel(status.processId, model);
+        }
+        handleModelChanged(model);
+      } catch (err) {
+        const message =
+          err instanceof Error ? err.message : t("modelSwitchChangeFailed");
+        showToast(message, "error");
+      }
+    },
+    [handleModelChanged, showToast, status, t],
+  );
+
+  const handleReasoningSelect = useCallback(
+    (value: ThinkingOption) => {
+      if (value === "off") {
+        setThinkingMode("off");
+        return;
+      }
+      if (value === "auto") {
+        setThinkingMode("auto");
+        return;
+      }
+      setThinkingMode("on");
+      setEffortLevel(value.slice(3) as typeof effortLevel);
+    },
+    [effortLevel, setEffortLevel, setThinkingMode],
+  );
+
+  const appendToDraft = useCallback((value: string) => {
+    const controls = draftControlsRef.current;
+    if (!controls) return;
+
+    const currentDraft = controls.getDraft();
+    const nextDraft = currentDraft.trimEnd()
+      ? `${currentDraft.trimEnd()} ${value}`
+      : value;
+    controls.setDraft(nextDraft);
   }, []);
+
+  const handleCustomCommand = useCallback(
+    (command: string) => {
+      if (command === "model") {
+        showToast(t("modelSwitchTitle"), "success");
+        return true;
+      }
+      if (command === "compact" && effectiveProvider === "codex") {
+        void api
+          .compactSession(projectId, sessionId)
+          .then((result) => {
+            if (status.owner !== "self") {
+              setStatus({ owner: "self", processId: result.processId });
+              reconnectStream();
+            }
+            setProcessState("idle");
+            void refreshSession();
+            showToast(t("codexSlashCompactStarted"), "success");
+          })
+          .catch((err) => {
+            const message = err instanceof Error ? err.message : String(err);
+            showToast(t("codexSlashCompactFailed", { message }), "error");
+          });
+        return true;
+      }
+      if (command === "plan" && effectiveProvider === "codex") {
+        setCodexPlanMode((value) => {
+          const nextValue = !value;
+          showToast(
+            nextValue
+              ? t("codexSlashPlanEnabled")
+              : t("codexSlashPlanDisabled"),
+            "success",
+          );
+          return nextValue;
+        });
+        return true;
+      }
+      if (command === "status" && effectiveProvider === "codex") {
+        setShowProcessInfoModal(true);
+        return true;
+      }
+      if (command === "skill" && effectiveProvider === "codex") {
+        setShowSkillModal(true);
+        return true;
+      }
+      return false;
+    },
+    [
+      codexPlanMode,
+      effectiveProvider,
+      projectId,
+      reconnectStream,
+      refreshSession,
+      sessionId,
+      setStatus,
+      showToast,
+      status.owner,
+      t,
+    ],
+  );
 
   const handleAbort = async () => {
     if (status.owner === "self" && status.processId) {
@@ -1062,6 +1256,7 @@ function SessionPageContent({
             status={status}
             processState={processState}
             contextUsage={session.contextUsage}
+            rateLimits={codexRateLimits}
             originator={session.originator}
             cliVersion={session.cliVersion}
             sessionSource={session.source}
@@ -1074,17 +1269,15 @@ function SessionPageContent({
           />
         )}
 
-        {/* Model Switch Modal */}
-        {showModelSwitchModal &&
-          status.owner === "self" &&
-          status.processId && (
-            <ModelSwitchModal
-              processId={status.processId}
-              currentModel={session?.model}
-              onModelChanged={handleModelChanged}
-              onClose={() => setShowModelSwitchModal(false)}
-            />
-          )}
+        {showSkillModal && session?.provider === "codex" && (
+          <CodexSkillModal
+            projectId={projectId}
+            onSelect={(skillName) => {
+              appendToDraft(`$${skillName}`);
+            }}
+            onClose={() => setShowSkillModal(false)}
+          />
+        )}
 
         {status.owner === "external" && (
           <div className="external-session-warning">
@@ -1173,11 +1366,37 @@ function SessionPageContent({
                   <MessageInputToolbar
                     mode={permissionMode}
                     onModeChange={setPermissionMode}
+                    provider={session?.provider}
                     isHeld={holdModeEnabled ? isHeld : undefined}
                     onHoldChange={holdModeEnabled ? setHold : undefined}
                     supportsPermissionMode={supportsPermissionMode}
                     supportsThinkingToggle={supportsThinkingToggle}
+                    planMode={codexPlanMode}
+                    onPlanModeToggle={
+                      effectiveProvider === "codex"
+                        ? () => setCodexPlanMode((value) => !value)
+                        : undefined
+                    }
+                    currentModel={
+                      effectiveProvider === "codex" ? effectiveModel : undefined
+                    }
+                    modelOptions={
+                      effectiveProvider === "codex"
+                        ? currentProviderInfo?.models
+                        : undefined
+                    }
+                    onModelChange={
+                      effectiveProvider === "codex"
+                        ? handleModelSelect
+                        : undefined
+                    }
+                    onThinkingChange={
+                      effectiveProvider === "codex"
+                        ? handleReasoningSelect
+                        : undefined
+                    }
                     contextUsage={session?.contextUsage}
+                    onContextUsageClick={() => setShowProcessInfoModal(true)}
                     isRunning={status.owner === "self"}
                     isThinking={processState === "in-turn"}
                     onStop={handleAbort}
@@ -1215,10 +1434,41 @@ function SessionPageContent({
                 }
                 mode={permissionMode}
                 onModeChange={setPermissionMode}
+                provider={session?.provider}
                 isHeld={holdModeEnabled ? isHeld : undefined}
                 onHoldChange={holdModeEnabled ? setHold : undefined}
                 supportsPermissionMode={supportsPermissionMode}
                 supportsThinkingToggle={supportsThinkingToggle}
+                planMode={codexPlanMode}
+                onPlanModeToggle={
+                  effectiveProvider === "codex"
+                    ? () => setCodexPlanMode((value) => !value)
+                    : undefined
+                }
+                thinkingMode={
+                  effectiveProvider === "codex" ? thinkingMode : undefined
+                }
+                effortLevel={
+                  effectiveProvider === "codex" ? effortLevel : undefined
+                }
+                currentModel={
+                  effectiveProvider === "codex" ? effectiveModel : undefined
+                }
+                modelOptions={
+                  effectiveProvider === "codex"
+                    ? currentProviderInfo?.models
+                    : undefined
+                }
+                onModelChange={
+                  effectiveProvider === "codex"
+                    ? handleModelSelect
+                    : undefined
+                }
+                onThinkingChange={
+                  effectiveProvider === "codex"
+                    ? handleReasoningSelect
+                    : undefined
+                }
                 isRunning={status.owner === "self"}
                 isThinking={processState === "in-turn"}
                 onStop={handleAbort}
@@ -1231,13 +1481,14 @@ function SessionPageContent({
                   )
                 }
                 contextUsage={session?.contextUsage}
+                onContextUsageClick={() => setShowProcessInfoModal(true)}
                 projectId={projectId}
                 sessionId={sessionId}
                 attachments={attachments}
                 onAttach={handleAttach}
                 onRemoveAttachment={handleRemoveAttachment}
                 uploadProgress={uploadProgress}
-                slashCommands={status.owner === "self" ? allSlashCommands : []}
+                slashCommands={status.owner !== "external" ? allSlashCommands : []}
                 onCustomCommand={handleCustomCommand}
               />
             )}

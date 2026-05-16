@@ -7,7 +7,7 @@
 
 import { type ChildProcess, exec, spawn } from "node:child_process";
 import { promisify } from "node:util";
-import type { ModelInfo } from "@yep-anywhere/shared";
+import type { CodexRateLimits, ModelInfo } from "@yep-anywhere/shared";
 import {
   isCodexCorrelationDebugEnabled,
   logCodexCorrelationDebug,
@@ -30,10 +30,12 @@ import type {
 import type { ToolApprovalResult } from "../types.js";
 import type {
   AskForApproval as CodexAskForApproval,
+  CollaborationMode as CodexCollaborationMode,
   ErrorNotification as CodexErrorNotification,
   ItemCompletedNotification as CodexItemCompletedNotification,
   ItemStartedNotification as CodexItemStartedNotification,
   SandboxMode as CodexSandboxMode,
+  SandboxPolicy as CodexSandboxPolicy,
   ThreadItem as CodexThreadItem,
   CommandExecutionApprovalDecision,
   CommandExecutionRequestApprovalParams,
@@ -56,6 +58,25 @@ import type {
   AuthStatus,
   StartSessionOptions,
 } from "./types.js";
+
+interface AskUserQuestionOption {
+  label: string;
+  description: string;
+}
+
+interface AskUserQuestionQuestion {
+  id: string;
+  question: string;
+  header: string;
+  options: AskUserQuestionOption[];
+  multiSelect: boolean;
+  allowOther?: boolean;
+  isSecret?: boolean;
+}
+
+interface AskUserQuestionInput {
+  questions: AskUserQuestionQuestion[];
+}
 
 const log = getLogger().child({ component: "codex-provider" });
 const execAsync = promisify(exec);
@@ -101,8 +122,11 @@ function withCodexTimestamp<T extends SDKMessage>(
 
 const MODEL_CACHE_TTL_MS = 60 * 60 * 1000;
 const MODEL_LIST_TIMEOUT_MS = 8000;
+const RATE_LIMIT_CACHE_TTL_MS = 15 * 1000;
+const RATE_LIMIT_READ_TIMEOUT_MS = 8000;
 const APP_SERVER_INIT_REQUEST_ID = 1;
 const APP_SERVER_MODEL_LIST_REQUEST_ID = 2;
+const APP_SERVER_RATE_LIMITS_REQUEST_ID = 3;
 const APP_SERVER_SHUTDOWN_GRACE_MS = 1500;
 
 /**
@@ -174,6 +198,25 @@ interface AppServerModel {
   upgrade?: string | null;
 }
 
+interface AppServerRateLimitWindow {
+  usedPercent?: number;
+  windowDurationMins?: number | null;
+  resetsAt?: number | null;
+}
+
+interface AppServerRateLimitSnapshot {
+  limitId?: string | null;
+  primary?: AppServerRateLimitWindow | null;
+  secondary?: AppServerRateLimitWindow | null;
+}
+
+interface AppServerRateLimitsResponse {
+  rateLimits?: AppServerRateLimitSnapshot | null;
+  rateLimitsByLimitId?:
+    | Record<string, AppServerRateLimitSnapshot | undefined>
+    | null;
+}
+
 interface TokenUsageSnapshot {
   inputTokens: number;
   outputTokens: number;
@@ -183,6 +226,9 @@ interface TokenUsageSnapshot {
 interface CodexTurnRuntimeState {
   threadId: string;
   activeTurnId: string | null;
+  currentModel?: string;
+  currentPermissionMode: NonNullable<StartSessionOptions["permissionMode"]>;
+  currentPlanMode: boolean;
 }
 
 async function terminateChildProcess(
@@ -632,6 +678,10 @@ export class CodexProvider implements AgentProvider {
 
   private readonly config: CodexProviderConfig;
   private modelCache: { models: ModelInfo[]; expiresAt: number } | null = null;
+  private rateLimitCache: {
+    limits: CodexRateLimits | null;
+    expiresAt: number;
+  } | null = null;
 
   constructor(config: CodexProviderConfig = {}) {
     this.config = config;
@@ -728,6 +778,29 @@ export class CodexProvider implements AgentProvider {
     };
 
     return models;
+  }
+
+  async getAccountRateLimits(): Promise<CodexRateLimits | null> {
+    const now = Date.now();
+    if (this.rateLimitCache && this.rateLimitCache.expiresAt > now) {
+      return this.rateLimitCache.limits;
+    }
+
+    if (!(await this.isCodexCliInstalled())) {
+      return null;
+    }
+
+    const limits = await this.requestAppServerRateLimits().catch((error) => {
+      log.debug({ error }, "Failed to query Codex account rate limits");
+      return null;
+    });
+
+    this.rateLimitCache = {
+      limits,
+      expiresAt: now + RATE_LIMIT_CACHE_TTL_MS,
+    };
+
+    return limits;
   }
 
   private async getModelsFromAppServer(): Promise<ModelInfo[]> {
@@ -886,6 +959,168 @@ export class CodexProvider implements AgentProvider {
     });
   }
 
+  private async requestAppServerRateLimits(): Promise<CodexRateLimits | null> {
+    const codexCommand = await this.resolveCodexCommand();
+    return new Promise((resolve, reject) => {
+      const child = spawn(
+        codexCommand,
+        ["app-server", "--listen", "stdio://"],
+        {
+          detached: process.platform !== "win32",
+          stdio: ["pipe", "pipe", "pipe"],
+          env: this.getCodexEnv(),
+          shell: process.platform === "win32",
+        },
+      );
+
+      let settled = false;
+      let stdoutBuffer = "";
+
+      const finish = (handler: () => void) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeoutHandle);
+        void terminateChildProcess(child);
+        handler();
+      };
+
+      const parseAndHandleLine = (line: string) => {
+        let message: JsonRpcResponse;
+        try {
+          message = JSON.parse(line) as JsonRpcResponse;
+        } catch {
+          return;
+        }
+
+        if (message.id === APP_SERVER_INIT_REQUEST_ID) {
+          if (message.error) {
+            const errorMessage =
+              message.error.message ?? "Codex app-server initialize failed";
+            finish(() => reject(new Error(errorMessage)));
+            return;
+          }
+
+          child.stdin.write(
+            `${JSON.stringify({ jsonrpc: "2.0", method: "initialized" })}\n`,
+          );
+          child.stdin.write(
+            `${JSON.stringify({
+              jsonrpc: "2.0",
+              id: APP_SERVER_RATE_LIMITS_REQUEST_ID,
+              method: "account/rateLimits/read",
+            })}\n`,
+          );
+          return;
+        }
+
+        if (message.id !== APP_SERVER_RATE_LIMITS_REQUEST_ID) {
+          return;
+        }
+
+        if (message.error) {
+          const errorMessage =
+            message.error.message ??
+            "Codex app-server account/rateLimits/read failed";
+          finish(() => reject(new Error(errorMessage)));
+          return;
+        }
+
+        finish(() =>
+          resolve(
+            this.normalizeRateLimits(
+              message.result as AppServerRateLimitsResponse | undefined,
+            ),
+          ),
+        );
+      };
+
+      const timeoutHandle = setTimeout(() => {
+        finish(() =>
+          reject(
+            new Error("Timed out querying Codex account rate limits"),
+          ),
+        );
+      }, RATE_LIMIT_READ_TIMEOUT_MS);
+
+      child.stdout.on("data", (chunk: Buffer) => {
+        stdoutBuffer += chunk.toString("utf-8");
+        const lines = stdoutBuffer.split("\n");
+        stdoutBuffer = lines.pop() ?? "";
+        for (const raw of lines) {
+          const line = raw.trim();
+          if (!line) continue;
+          parseAndHandleLine(line);
+        }
+      });
+
+      child.stderr.on("data", () => {});
+
+      child.on("error", (error) => {
+        finish(() => reject(error));
+      });
+
+      child.on("exit", (code, signal) => {
+        if (settled) return;
+        finish(() =>
+          reject(
+            new Error(
+              `Codex app-server exited before account/rateLimits/read response (code=${code ?? "null"}, signal=${signal ?? "null"}).`,
+            ),
+          ),
+        );
+      });
+
+      child.stdin.write(
+        `${JSON.stringify({
+          jsonrpc: "2.0",
+          id: APP_SERVER_INIT_REQUEST_ID,
+          method: "initialize",
+          params: {
+            clientInfo: {
+              name: this.getCodexClientName(),
+              version: "dev",
+            },
+            capabilities: null,
+          },
+        })}\n`,
+      );
+    });
+  }
+
+  private normalizeRateLimits(
+    response: AppServerRateLimitsResponse | undefined,
+  ): CodexRateLimits | null {
+    const snapshot =
+      response?.rateLimitsByLimitId?.codex ?? response?.rateLimits ?? null;
+    if (!snapshot) {
+      return null;
+    }
+
+    const normalizeWindow = (
+      window: AppServerRateLimitWindow | null | undefined,
+    ) => {
+      if (!window || typeof window.usedPercent !== "number") {
+        return undefined;
+      }
+      return {
+        usedPercent: window.usedPercent,
+        windowMinutes: window.windowDurationMins ?? 0,
+        resetsAt: window.resetsAt ?? 0,
+      };
+    };
+
+    const primary = normalizeWindow(snapshot.primary);
+    const secondary = normalizeWindow(snapshot.secondary);
+    if (!primary && !secondary) {
+      return null;
+    }
+
+    return {
+      ...(primary && { primary }),
+      secondary: secondary ?? null,
+    };
+  }
+
   private normalizeModelList(models: AppServerModel[]): ModelInfo[] {
     const orderLookup = new Map<string, number>(
       PREFERRED_MODEL_ORDER.map((id, idx) => [id, idx]),
@@ -981,10 +1216,10 @@ export class CodexProvider implements AgentProvider {
       });
     }
 
-    if (permissionMode === "plan") {
+    if (permissionMode === "acceptEdits") {
       return applyOverrides({
-        approvalPolicy: "on-request",
-        sandbox: "read-only",
+        approvalPolicy: "on-failure",
+        sandbox: "workspace-write",
       });
     }
 
@@ -992,6 +1227,64 @@ export class CodexProvider implements AgentProvider {
       approvalPolicy: "on-request",
       sandbox: "workspace-write",
     });
+  }
+
+  private mapPermissionModeToTurnPolicy(
+    permissionMode: NonNullable<StartSessionOptions["permissionMode"]>,
+    cwd: string,
+  ): {
+    approvalPolicy: CodexAskForApproval;
+    sandboxPolicy: CodexSandboxPolicy;
+  } {
+    const threadPolicy = this.mapPermissionModeToThreadPolicy(permissionMode);
+
+    if (threadPolicy.sandbox === "danger-full-access") {
+      return {
+        approvalPolicy: threadPolicy.approvalPolicy,
+        sandboxPolicy: { type: "dangerFullAccess" },
+      };
+    }
+
+    if (threadPolicy.sandbox === "read-only") {
+      return {
+        approvalPolicy: threadPolicy.approvalPolicy,
+        sandboxPolicy: {
+          type: "readOnly",
+          access: { type: "fullAccess" },
+        },
+      };
+    }
+
+    return {
+      approvalPolicy: threadPolicy.approvalPolicy,
+      sandboxPolicy: {
+        type: "workspaceWrite",
+        writableRoots: [cwd],
+        readOnlyAccess: { type: "fullAccess" },
+        networkAccess: false,
+        excludeTmpdirEnvVar: false,
+        excludeSlashTmp: false,
+      },
+    };
+  }
+
+  private buildCollaborationMode(
+    planMode: boolean,
+    model: string | undefined,
+    effort: ReturnType<CodexProvider["mapEffortToReasoningEffort"]>,
+  ): CodexCollaborationMode | undefined {
+    if (!model) {
+      return undefined;
+    }
+
+    return {
+      mode: planMode ? "plan" : "default",
+      settings: {
+        model,
+        reasoning_effort: effort ?? null,
+        developer_instructions: null,
+      },
+    };
   }
 
   /**
@@ -1003,6 +1296,9 @@ export class CodexProvider implements AgentProvider {
     const runtimeState: CodexTurnRuntimeState = {
       threadId: options.resumeSessionId ?? "",
       activeTurnId: null,
+      currentModel: options.model,
+      currentPermissionMode: options.permissionMode ?? "default",
+      currentPlanMode: options.planMode ?? false,
     };
 
     // Push initial message if provided
@@ -1011,6 +1307,10 @@ export class CodexProvider implements AgentProvider {
     }
 
     let activeClient: CodexAppServerClient | null = null;
+    let resolveThreadReady: (() => void) | null = null;
+    const threadReady = new Promise<void>((resolve) => {
+      resolveThreadReady = resolve;
+    });
     const iterator = this.runSession(
       options,
       queue,
@@ -1018,6 +1318,10 @@ export class CodexProvider implements AgentProvider {
       runtimeState,
       (client) => {
         activeClient = client;
+      },
+      () => {
+        resolveThreadReady?.();
+        resolveThreadReady = null;
       },
     );
 
@@ -1031,6 +1335,25 @@ export class CodexProvider implements AgentProvider {
       isProcessAlive: () => activeClient?.isAlive() ?? false,
       get pid() {
         return activeClient?.pid;
+      },
+      supportedModels: async () => await this.getAvailableModels(),
+      setModel: async (model?: string) => {
+        runtimeState.currentModel = model;
+      },
+      setPermissionMode: (mode) => {
+        runtimeState.currentPermissionMode = mode;
+      },
+      setPlanMode: (enabled) => {
+        runtimeState.currentPlanMode = enabled;
+      },
+      compact: async () => {
+        await threadReady;
+        if (!activeClient || !runtimeState.threadId) {
+          throw new Error("Codex thread is not ready");
+        }
+        await activeClient.request("thread/compact/start", {
+          threadId: runtimeState.threadId,
+        });
       },
       steer: async (message) => {
         if (!activeClient) return false;
@@ -1070,6 +1393,7 @@ export class CodexProvider implements AgentProvider {
     signal: AbortSignal,
     runtimeState: CodexTurnRuntimeState,
     setActiveClient: (client: CodexAppServerClient) => void,
+    onThreadReady: () => void,
   ): AsyncIterableIterator<SDKMessage> {
     const codexCommand = await this.resolveCodexCommand();
     const appServer = new CodexAppServerClient(
@@ -1102,23 +1426,25 @@ export class CodexProvider implements AgentProvider {
           name: this.getCodexClientName(),
           version: "dev",
         },
-        capabilities: null,
+        capabilities: {
+          experimentalApi: true,
+        },
       });
       appServer.notify("initialized");
 
       const policy = this.mapPermissionModeToThreadPolicy(
-        options.permissionMode,
+        runtimeState.currentPermissionMode,
       );
 
       const threadResumeParams: ThreadResumeParams = {
         threadId: options.resumeSessionId ?? sessionId,
-        model: options.model ?? null,
+        model: runtimeState.currentModel ?? null,
         cwd: options.cwd,
         approvalPolicy: policy.approvalPolicy,
         sandbox: policy.sandbox,
       };
       const threadStartParams: ThreadStartParams = {
-        model: options.model ?? null,
+        model: runtimeState.currentModel ?? null,
         cwd: options.cwd,
         approvalPolicy: policy.approvalPolicy,
         sandbox: policy.sandbox,
@@ -1137,20 +1463,23 @@ export class CodexProvider implements AgentProvider {
 
       sessionId = threadResult.thread.id;
       runtimeState.threadId = sessionId;
+      onThreadReady();
       log.info(
         {
           sessionId,
-          permissionMode: options.permissionMode ?? "default",
+          permissionMode: runtimeState.currentPermissionMode,
           approvalPolicy: policy.approvalPolicy,
           sandbox: policy.sandbox,
           policyOverrides: {
             approvalPolicy: CODEX_POLICY_OVERRIDES.approvalPolicy,
             sandbox: CODEX_POLICY_OVERRIDES.sandbox,
           },
-          model: options.model ?? null,
+          model: runtimeState.currentModel ?? null,
         },
         "Started Codex app-server session thread",
       );
+      runtimeState.currentModel =
+        threadResult.model || runtimeState.currentModel;
 
       // Emit init immediately with the real session ID.
       yield logMessage(
@@ -1200,13 +1529,27 @@ export class CodexProvider implements AgentProvider {
         });
         yield logMessage(userMessage);
 
+        const turnPolicy = this.mapPermissionModeToTurnPolicy(
+          runtimeState.currentPermissionMode,
+          options.cwd,
+        );
+        const turnEffort = this.mapEffortToReasoningEffort(
+          options.effort,
+          options.thinking,
+        );
+        const collaborationMode = this.buildCollaborationMode(
+          runtimeState.currentPlanMode,
+          runtimeState.currentModel,
+          turnEffort,
+        );
         const turnStartParams: TurnStartParams = {
           threadId: sessionId,
           input: [{ type: "text", text: userPrompt, text_elements: [] }],
-          effort: this.mapEffortToReasoningEffort(
-            options.effort,
-            options.thinking,
-          ),
+          approvalPolicy: turnPolicy.approvalPolicy,
+          sandboxPolicy: turnPolicy.sandboxPolicy,
+          model: runtimeState.currentModel ?? null,
+          effort: turnEffort,
+          collaborationMode,
         };
         const turnResult = await appServer.request<TurnStartResponse>(
           "turn/start",
@@ -1534,13 +1877,17 @@ export class CodexProvider implements AgentProvider {
       case "item/tool/requestUserInput": {
         const requestInput = this.asToolRequestUserInputParams(request.params);
         const questions = requestInput?.questions ?? [];
-
-        // MVP: return empty answers so request can complete without blocking.
-        const answers: ToolRequestUserInputResponse["answers"] = {};
-        for (const question of questions) {
-          answers[question.id] = { answers: [] };
-        }
-        log.warn(
+        const askInput = this.toAskUserQuestionInput(questions);
+        const result = await options.onToolApproval?.(
+          "AskUserQuestion",
+          askInput,
+          { signal },
+        );
+        const response = this.toToolRequestUserInputResponse(
+          questions,
+          result,
+        );
+        log.info(
           {
             method: request.method,
             requestId: request.id,
@@ -1548,10 +1895,11 @@ export class CodexProvider implements AgentProvider {
             threadId: requestInput?.threadId ?? null,
             turnId: requestInput?.turnId ?? null,
             itemId: requestInput?.itemId ?? null,
+            answeredCount: Object.keys(response.answers).length,
+            behavior: result?.behavior ?? null,
           },
-          "Codex requested tool user input; returning empty answers in MVP",
+          "Resolved Codex tool user input request",
         );
-        const response: ToolRequestUserInputResponse = { answers };
         return response;
       }
 
@@ -1985,6 +2333,48 @@ export class CodexProvider implements AgentProvider {
       return null;
     }
     return params as ToolRequestUserInputParams;
+  }
+
+  private toAskUserQuestionInput(
+    questions: ToolRequestUserInputParams["questions"],
+  ): AskUserQuestionInput {
+    return {
+      questions: questions.map((question) => ({
+        id: question.id,
+        header: question.header,
+        question: question.question,
+        options:
+          question.options?.map((option) => ({
+            label: option.label,
+            description: option.description,
+          })) ?? [],
+        multiSelect: false,
+        allowOther: question.isOther,
+        isSecret: question.isSecret,
+      })),
+    };
+  }
+
+  private toToolRequestUserInputResponse(
+    questions: ToolRequestUserInputParams["questions"],
+    result?: ToolApprovalResult,
+  ): ToolRequestUserInputResponse {
+    const updatedInput = result?.updatedInput as
+      | { answers?: Record<string, string> }
+      | undefined;
+    const providedAnswers = updatedInput?.answers ?? {};
+    const answers: ToolRequestUserInputResponse["answers"] = {};
+
+    for (const question of questions) {
+      const answer = providedAnswers[question.id];
+      if (typeof answer === "string" && answer.trim().length > 0) {
+        answers[question.id] = { answers: [answer] };
+        continue;
+      }
+      answers[question.id] = { answers: [] };
+    }
+
+    return { answers };
   }
 
   private asItemStartedNotification(

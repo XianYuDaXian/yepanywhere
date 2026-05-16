@@ -1,4 +1,5 @@
 import {
+  type EffortLevel,
   type MarkdownAugment,
   type ProviderName,
   getModelContextWindow,
@@ -126,6 +127,10 @@ export function useSession(
   const [deferredMessages, setDeferredMessages] = useState<DeferredMessage[]>(
     [],
   );
+  const [processThinkingType, setProcessThinkingType] = useState<
+    string | undefined
+  >();
+  const [processEffort, setProcessEffort] = useState<EffortLevel | undefined>();
 
   // Compacting state - true when context is being compressed
   const [isCompacting, setIsCompacting] = useState(false);
@@ -845,6 +850,8 @@ export function useSession(
           request?: InputRequest;
           provider?: ProviderName;
           model?: string;
+          thinking?: { type: string };
+          effort?: string;
           deferredMessages?: DeferredMessage[];
         };
 
@@ -889,6 +896,8 @@ export function useSession(
         // incomplete data (e.g., JSONL not yet written for new sessions)
         const sseProvider = connectedData.provider;
         const sseModel = connectedData.model;
+        setProcessThinkingType(connectedData.thinking?.type);
+        setProcessEffort(connectedData.effort as EffortLevel | undefined);
         if (sseProvider) {
           setSession((prev) => {
             if (!prev) return prev;
@@ -1081,6 +1090,8 @@ export function useSession(
     removePendingMessage, // Remove from pending by tempId
     updatePendingMessage, // Update pending message fields (e.g. status)
     deferredMessages, // Messages queued server-side waiting for agent turn to end
+    processThinkingType,
+    processEffort,
     slashCommands, // Available slash commands from init message
     sessionTools, // Available tools from init message
     mcpServers, // Available MCP servers from init message
@@ -1088,5 +1099,8 @@ export function useSession(
     loadingOlder, // Whether older messages are being loaded
     loadOlderMessages, // Load next chunk of older messages
     reconnectStream, // Force session stream reconnection (e.g., after process restart)
+    refreshSession: async () => {
+      await Promise.all([fetchNewMessages(), fetchSessionMetadata()]);
+    },
   };
 }

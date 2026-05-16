@@ -67,6 +67,7 @@ export interface GlobalSessionItem {
   // Project context
   projectId: string;
   projectName: string;
+  projectPath?: string;
   // Enrichment (all in-memory, cheap)
   ownership: SessionOwnership;
   pendingInputType?: PendingInputType;
@@ -95,6 +96,7 @@ export interface GlobalSessionStats {
 export interface ProjectOption {
   id: string;
   name: string;
+  path?: string;
 }
 
 export interface GlobalSessionsResponse {
@@ -283,7 +285,7 @@ export function createGlobalSessionsRoutes(deps: GlobalSessionsDeps): Hono {
 
     // Build project options for filter dropdown (from all projects, sorted by name)
     const projectOptions: ProjectOption[] = allProjects
-      .map((p) => ({ id: p.id, name: p.name }))
+      .map((p) => ({ id: p.id, name: p.name, path: p.path }))
       .sort((a, b) => a.name.localeCompare(b.name));
 
     // Collect all sessions with enriched data
@@ -374,6 +376,7 @@ export function createGlobalSessionsRoutes(deps: GlobalSessionsDeps): Hono {
           provider: session.provider,
           projectId: session.projectId,
           projectName: project.name,
+          projectPath: project.path,
           ownership,
           pendingInputType,
           activity,

@@ -216,10 +216,13 @@ export interface AskUserQuestionInput {
 }
 
 export interface Question {
+  id?: string;
   question: string;
   header: string;
   options: Array<{ label: string; description: string }>;
   multiSelect: boolean;
+  allowOther?: boolean;
+  isSecret?: boolean;
 }
 
 export interface AskUserQuestionResult {

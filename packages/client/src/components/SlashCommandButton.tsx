@@ -7,6 +7,9 @@ interface SlashCommandButtonProps {
   onSelectCommand: (command: string) => void;
   /** Whether the button should be disabled */
   disabled?: boolean;
+  forceOpen?: boolean;
+  query?: string;
+  onOpenChange?: (open: boolean) => void;
 }
 
 /**
@@ -17,14 +20,32 @@ export function SlashCommandButton({
   commands,
   onSelectCommand,
   disabled,
+  forceOpen = false,
+  query = "",
+  onOpenChange,
 }: SlashCommandButtonProps) {
   const [isOpen, setIsOpen] = useState(false);
   const buttonRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+  const open = forceOpen || isOpen;
+  const normalizedQuery = query.trim().toLowerCase();
+  const visibleCommands = normalizedQuery
+    ? commands.filter((command) => command.toLowerCase().includes(normalizedQuery))
+    : commands;
+
+  const setOpenState = useCallback(
+    (next: boolean) => {
+      if (!forceOpen) {
+        setIsOpen(next);
+      }
+      onOpenChange?.(next);
+    },
+    [forceOpen, onOpenChange],
+  );
 
   // Close menu when clicking outside
   useEffect(() => {
-    if (!isOpen) return;
+    if (!open) return;
 
     const handleClickOutside = (e: MouseEvent) => {
       if (
@@ -33,35 +54,35 @@ export function SlashCommandButton({
         buttonRef.current &&
         !buttonRef.current.contains(e.target as Node)
       ) {
-        setIsOpen(false);
+        setOpenState(false);
       }
     };
 
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, [isOpen]);
+  }, [open, setOpenState]);
 
   // Close menu on Escape
   useEffect(() => {
-    if (!isOpen) return;
+    if (!open) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
-        setIsOpen(false);
+        setOpenState(false);
         buttonRef.current?.focus();
       }
     };
 
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [isOpen]);
+  }, [open, setOpenState]);
 
   const handleCommandClick = useCallback(
     (command: string) => {
       onSelectCommand(`/${command}`);
-      setIsOpen(false);
+      setOpenState(false);
     },
-    [onSelectCommand],
+    [onSelectCommand, setOpenState],
   );
 
   // Don't render if no commands available
@@ -74,24 +95,24 @@ export function SlashCommandButton({
       <button
         ref={buttonRef}
         type="button"
-        className={`slash-command-button ${isOpen ? "active" : ""}`}
-        onClick={() => setIsOpen(!isOpen)}
+        className={`slash-command-button ${open ? "active" : ""}`}
+        onClick={() => setOpenState(!open)}
         disabled={disabled}
         title="Slash commands"
         aria-label="Show slash commands"
-        aria-expanded={isOpen}
+        aria-expanded={open}
         aria-haspopup="menu"
       >
         <span className="slash-icon">/</span>
       </button>
-      {isOpen && (
+      {open && (
         <div
           ref={menuRef}
           className="slash-command-menu"
           role="menu"
           aria-label="Slash commands"
         >
-          {commands.map((command) => (
+          {visibleCommands.map((command) => (
             <button
               key={command}
               type="button"
@@ -102,6 +123,9 @@ export function SlashCommandButton({
               /{command}
             </button>
           ))}
+          {visibleCommands.length === 0 && (
+            <div className="slash-command-empty">No commands</div>
+          )}
         </div>
       )}
     </div>

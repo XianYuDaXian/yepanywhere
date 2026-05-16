@@ -1,4 +1,11 @@
-import type { UploadedFile } from "@yep-anywhere/shared";
+import type {
+  EffortLevel,
+  ModelInfo,
+  ProviderName,
+  ThinkingMode,
+  ThinkingOption,
+  UploadedFile,
+} from "@yep-anywhere/shared";
 import {
   type ClipboardEvent,
   type KeyboardEvent,
@@ -36,6 +43,45 @@ function formatSize(bytes: number): string {
   return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
 }
 
+function isImageAttachment(file: UploadedFile): boolean {
+  return file.mimeType.startsWith("image/");
+}
+
+function getAttachmentPreviewUrl(
+  projectId: string | undefined,
+  sessionId: string | undefined,
+  file: UploadedFile,
+): string | null {
+  if (!projectId || !sessionId || !isImageAttachment(file)) return null;
+  return `/api/projects/${projectId}/sessions/${sessionId}/upload/${encodeURIComponent(file.name)}`;
+}
+
+interface SlashQueryState {
+  query: string;
+  start: number;
+  end: number;
+}
+
+function getSlashQueryState(
+  value: string,
+  selectionStart: number | null,
+): SlashQueryState | null {
+  if (selectionStart === null) return null;
+  const beforeCursor = value.slice(0, selectionStart);
+  const match = /(?:^|\s)\/([A-Za-z0-9-]*)$/.exec(beforeCursor);
+  if (!match || match.index === undefined) {
+    return null;
+  }
+  const fullMatch = match[0] ?? "";
+  const slashOffset = fullMatch.lastIndexOf("/");
+  const start = match.index + slashOffset;
+  return {
+    query: match[1] ?? "",
+    start,
+    end: selectionStart,
+  };
+}
+
 interface Props {
   onSend: (text: string) => void;
   /** Queue a deferred message (sent when agent's turn ends). Only provided when agent is running. */
@@ -44,6 +90,7 @@ interface Props {
   placeholder?: string;
   mode?: PermissionMode;
   onModeChange?: (mode: PermissionMode) => void;
+  provider?: ProviderName;
   isHeld?: boolean;
   onHoldChange?: (held: boolean) => void;
   isRunning?: boolean;
@@ -56,6 +103,8 @@ interface Props {
   onDraftControlsReady?: (controls: DraftControls) => void;
   /** Context usage for displaying usage indicator */
   contextUsage?: ContextUsage;
+  /** 点击上下文指示器后打开会话详情 */
+  onContextUsageClick?: () => void;
   /** Project ID for uploads (required to enable attach button) */
   projectId?: string;
   /** Session ID for uploads (required to enable attach button) */
@@ -72,6 +121,16 @@ interface Props {
   supportsPermissionMode?: boolean;
   /** Whether the provider supports thinking toggle (default: true) */
   supportsThinkingToggle?: boolean;
+  onThinkingClick?: () => void;
+  thinkingMode?: ThinkingMode;
+  effortLevel?: EffortLevel;
+  currentModel?: string;
+  onModelClick?: () => void;
+  modelOptions?: ModelInfo[];
+  onModelChange?: (model: string) => void;
+  planMode?: boolean;
+  onPlanModeToggle?: () => void;
+  onThinkingChange?: (value: ThinkingOption) => void;
   /** Available slash commands (without "/" prefix) */
   slashCommands?: string[];
   /** Callback for custom client-side commands (e.g., "model"). Return true if handled. */
@@ -85,6 +144,7 @@ export function MessageInput({
   placeholder,
   mode = "default",
   onModeChange,
+  provider,
   isHeld,
   onHoldChange,
   isRunning,
@@ -94,6 +154,7 @@ export function MessageInput({
   collapsed: externalCollapsed,
   onDraftControlsReady,
   contextUsage,
+  onContextUsageClick,
   projectId,
   sessionId,
   attachments = [],
@@ -102,6 +163,16 @@ export function MessageInput({
   uploadProgress = [],
   supportsPermissionMode = true,
   supportsThinkingToggle = true,
+  onThinkingClick,
+  thinkingMode,
+  effortLevel,
+  currentModel,
+  onModelClick,
+  modelOptions,
+  onModelChange,
+  planMode,
+  onPlanModeToggle,
+  onThinkingChange,
   slashCommands = [],
   onCustomCommand,
 }: Props) {
@@ -113,6 +184,9 @@ export function MessageInput({
   // User-controlled collapse state (independent of external collapse from approval panel)
   const [userCollapsed, setUserCollapsed] = useState(false);
   const [interimTranscript, setInterimTranscript] = useState("");
+  const [slashQueryState, setSlashQueryState] = useState<SlashQueryState | null>(
+    null,
+  );
 
   // Combined display text: committed text + interim transcript
   const displayText = interimTranscript
@@ -134,6 +208,19 @@ export function MessageInput({
   const collapsed = userCollapsed || externalCollapsed;
 
   const canAttach = !!(projectId && sessionId && onAttach);
+  const filteredSlashCommands =
+    slashQueryState && slashCommands.length > 0
+      ? slashCommands.filter((command) =>
+          command.toLowerCase().includes(slashQueryState.query.toLowerCase()),
+        )
+      : slashCommands;
+
+  const updateSlashQueryState = useCallback(
+    (value: string, selectionStart: number | null) => {
+      setSlashQueryState(getSlashQueryState(value, selectionStart));
+    },
+    [],
+  );
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
@@ -190,6 +277,25 @@ export function MessageInput({
   }, [text, disabled, controls, onQueue, attachments.length]);
 
   const handleKeyDown = (e: KeyboardEvent) => {
+    if (slashQueryState && e.key === "Escape") {
+      e.preventDefault();
+      setSlashQueryState(null);
+      return;
+    }
+
+    if (
+      slashQueryState &&
+      e.key === "Enter" &&
+      !e.shiftKey &&
+      !e.ctrlKey &&
+      !e.nativeEvent.isComposing &&
+      filteredSlashCommands.length > 0
+    ) {
+      e.preventDefault();
+      handleSlashCommand(`/${filteredSlashCommands[0]}`);
+      return;
+    }
+
     // Ctrl+Space toggles voice input
     if (e.key === " " && e.ctrlKey && !e.shiftKey && !e.altKey) {
       e.preventDefault();
@@ -306,20 +412,41 @@ export function MessageInput({
       // Check if this is a custom client-side command (strip leading "/")
       const bare = command.startsWith("/") ? command.slice(1) : command;
       if (onCustomCommand?.(bare)) {
+        if (slashQueryState) {
+          const nextText =
+            text.slice(0, slashQueryState.start) + text.slice(slashQueryState.end);
+          setText(nextText);
+        }
+        setSlashQueryState(null);
         return; // Custom command handled, don't insert text
       }
-      // If text is empty or ends with whitespace, just append the command
-      // Otherwise, add a space before it
+      if (slashQueryState) {
+        const nextText =
+          text.slice(0, slashQueryState.start) +
+          `${command} ` +
+          text.slice(slashQueryState.end);
+        setText(nextText);
+        setSlashQueryState(null);
+        requestAnimationFrame(() => {
+          const textarea = textareaRef.current;
+          if (!textarea) return;
+          const caret = slashQueryState.start + command.length + 1;
+          textarea.focus();
+          textarea.setSelectionRange(caret, caret);
+        });
+        return;
+      }
+
       const trimmed = text.trimEnd();
       if (trimmed) {
         setText(`${trimmed} ${command} `);
       } else {
         setText(`${command} `);
       }
-      // Focus the textarea so user can continue typing
+      setSlashQueryState(null);
       textareaRef.current?.focus();
     },
-    [text, setText, onCustomCommand],
+    [text, setText, onCustomCommand, slashQueryState],
   );
 
   return (
@@ -362,6 +489,13 @@ export function MessageInput({
             // This clears interim since they're now typing
             setInterimTranscript("");
             setText(e.target.value);
+            updateSlashQueryState(e.target.value, e.target.selectionStart);
+          }}
+          onSelect={(e) => {
+            updateSlashQueryState(
+              e.currentTarget.value,
+              e.currentTarget.selectionStart,
+            );
           }}
           onKeyDown={handleKeyDown}
           onPaste={handlePaste}
@@ -378,6 +512,16 @@ export function MessageInput({
             <div className="attachment-list">
               {attachments.map((file) => (
                 <div key={file.id} className="attachment-chip">
+                  {getAttachmentPreviewUrl(projectId, sessionId, file) && (
+                    <img
+                      className="attachment-preview"
+                      src={
+                        getAttachmentPreviewUrl(projectId, sessionId, file) ??
+                        undefined
+                      }
+                      alt={file.originalName}
+                    />
+                  )}
                   <span className="attachment-name" title={file.path}>
                     {file.originalName}
                   </span>
@@ -423,10 +567,21 @@ export function MessageInput({
           <MessageInputToolbar
             mode={mode}
             onModeChange={onModeChange}
+            provider={provider}
             isHeld={isHeld}
             onHoldChange={onHoldChange}
             supportsPermissionMode={supportsPermissionMode}
             supportsThinkingToggle={supportsThinkingToggle}
+            onThinkingClick={onThinkingClick}
+            thinkingModeOverride={thinkingMode}
+            effortLevelOverride={effortLevel}
+            currentModel={currentModel}
+            onModelClick={onModelClick}
+            modelOptions={modelOptions}
+            onModelChange={onModelChange}
+            planMode={planMode}
+            onPlanModeToggle={onPlanModeToggle}
+            onThinkingChange={onThinkingChange}
             canAttach={canAttach}
             attachmentCount={attachments.length}
             onAttachClick={() => fileInputRef.current?.click()}
@@ -437,7 +592,16 @@ export function MessageInput({
             voiceDisabled={disabled}
             slashCommands={slashCommands}
             onSelectSlashCommand={handleSlashCommand}
+            slashMenuOpen={slashQueryState !== null}
+            slashMenuQuery={slashQueryState?.query ?? ""}
+            filteredSlashCommands={filteredSlashCommands}
+            onSlashMenuOpenChange={(open) => {
+              if (!open) {
+                setSlashQueryState(null);
+              }
+            }}
             contextUsage={contextUsage}
+            onContextUsageClick={onContextUsageClick}
             isRunning={isRunning}
             isThinking={isThinking}
             onStop={onStop}

@@ -4,8 +4,9 @@ import { useI18n } from "../i18n";
 import { Modal } from "./ui/Modal";
 
 interface ModelSwitchModalProps {
-  processId: string;
+  processId?: string;
   currentModel?: string;
+  fallbackModels?: ModelOption[];
   onModelChanged: (model: string) => void;
   onClose: () => void;
 }
@@ -16,9 +17,14 @@ interface ModelOption {
   description?: string;
 }
 
+function normalizeModelId(value: string | undefined): string {
+  return (value ?? "").trim().toLowerCase();
+}
+
 export function ModelSwitchModal({
   processId,
   currentModel,
+  fallbackModels,
   onModelChanged,
   onClose,
 }: ModelSwitchModalProps) {
@@ -29,19 +35,32 @@ export function ModelSwitchModal({
   const [switching, setSwitching] = useState(false);
 
   useEffect(() => {
+    if (fallbackModels && fallbackModels.length > 0) {
+      setModels(fallbackModels);
+      setLoading(false);
+      setError(null);
+      return;
+    }
+    if (!processId) {
+      setModels([]);
+      setLoading(false);
+      return;
+    }
     api
       .getProcessModels(processId)
       .then((res) => setModels(res.models))
       .catch((err) => setError(err.message || t("modelSwitchLoadFailed")))
       .finally(() => setLoading(false));
-  }, [processId, t]);
+  }, [fallbackModels, processId, t]);
 
   const handleSelect = async (modelId: string) => {
     if (switching) return;
     setSwitching(true);
     setError(null);
     try {
-      await api.setProcessModel(processId, modelId);
+      if (processId) {
+        await api.setProcessModel(processId, modelId);
+      }
       onModelChanged(modelId);
       onClose();
     } catch (err: unknown) {
@@ -65,10 +84,12 @@ export function ModelSwitchModal({
         {!loading && models.length > 0 && (
           <div className="model-switch-list">
             {models.map((model) => {
-              const isCurrent = currentModel
-                ? currentModel.includes(model.id) ||
-                  model.id.includes(currentModel)
-                : false;
+              const normalizedCurrent = normalizeModelId(currentModel);
+              const isCurrent =
+                normalizedCurrent.length > 0 &&
+                [model.id, model.name].some(
+                  (value) => normalizeModelId(value) === normalizedCurrent,
+                );
               return (
                 <button
                   key={model.id}

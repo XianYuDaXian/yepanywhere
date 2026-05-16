@@ -1,4 +1,5 @@
 import type {
+  CodexRateLimits,
   ContextUsage,
   ProviderName,
   SessionSandboxPolicy,
@@ -39,6 +40,7 @@ interface ProcessInfoModalProps {
   status: SessionStatus;
   processState: ProcessState;
   contextUsage?: ContextUsage;
+  rateLimits?: CodexRateLimits | null;
   originator?: string;
   cliVersion?: string;
   sessionSource?: string;
@@ -139,6 +141,16 @@ function formatSandboxPolicy(
   return `${policy.type} (${details.join(", ")})`;
 }
 
+function getRemainingPercent(usedPercent: number): number {
+  return Math.max(0, Math.min(100, Math.round(100 - usedPercent)));
+}
+
+function formatResetTime(timestamp: number): string {
+  const normalizedTimestamp =
+    timestamp < 1_000_000_000_000 ? timestamp * 1000 : timestamp;
+  return new Date(normalizedTimestamp).toLocaleString();
+}
+
 function InfoRow({
   label,
   value,
@@ -181,6 +193,7 @@ export function ProcessInfoModal({
   status,
   processState,
   contextUsage,
+  rateLimits,
   originator,
   cliVersion,
   sessionSource,
@@ -368,6 +381,37 @@ export function ProcessInfoModal({
                 label={t("processInfoLabelCacheCreated")}
                 value={contextUsage.cacheCreationTokens.toLocaleString()}
               />
+            )}
+          </Section>
+        )}
+
+        {provider === "codex" && rateLimits?.primary && (
+          <Section title={t("processInfoSectionRateLimits")}>
+            <InfoRow
+              label={t("processInfoLabelRateLimitFiveHour")}
+              value={t("codexRateLimitFiveHour", {
+                percent: getRemainingPercent(rateLimits.primary.usedPercent),
+              })}
+            />
+            <InfoRow
+              label={t("processInfoLabelRateLimitResets")}
+              value={formatResetTime(rateLimits.primary.resetsAt)}
+            />
+            {rateLimits.secondary && (
+              <>
+                <InfoRow
+                  label={t("processInfoLabelRateLimitWeekly")}
+                  value={t("codexRateLimitWeekly", {
+                    percent: getRemainingPercent(
+                      rateLimits.secondary.usedPercent,
+                    ),
+                  })}
+                />
+                <InfoRow
+                  label={t("processInfoLabelRateLimitWeeklyReset")}
+                  value={formatResetTime(rateLimits.secondary.resetsAt)}
+                />
+              </>
             )}
           </Section>
         )}

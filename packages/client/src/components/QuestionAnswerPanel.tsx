@@ -35,19 +35,39 @@ export function QuestionAnswerPanel({
 
   const otherInputRef = useRef<HTMLInputElement>(null);
 
+  const getQuestionKey = useCallback(
+    (question: Question) => question.id || question.question,
+    [],
+  );
+
   const currentQuestion = questions[currentTab];
   const isLastQuestion = currentTab === questions.length - 1;
-  const currentAnswer = currentQuestion
-    ? answers[currentQuestion.question]
+  const currentQuestionKey = currentQuestion
+    ? getQuestionKey(currentQuestion)
     : undefined;
-  const isOtherSelected = currentAnswer === "__other__";
+  const currentAnswer = currentQuestionKey
+    ? answers[currentQuestionKey]
+    : undefined;
+  const currentAllowsOther =
+    (currentQuestion?.allowOther ?? false) ||
+    (currentQuestion?.options.length ?? 0) === 0 ||
+    (currentQuestion?.isSecret ?? false);
+  const hasSelectableOptions = (currentQuestion?.options.length ?? 0) > 0;
+  const isOtherSelected =
+    currentAllowsOther &&
+    (!hasSelectableOptions || currentAnswer === "__other__");
 
   // Check if all questions are answered
   const allAnswered = questions.every((q) => {
-    const answer = answers[q.question];
-    if (!answer) return false;
-    if (answer === "__other__") {
-      return (otherTexts[q.question] || "").trim().length > 0;
+    const questionKey = getQuestionKey(q);
+    const answer = answers[questionKey];
+    const allowsOther =
+      (q.allowOther ?? false) ||
+      q.options.length === 0 ||
+      (q.isSecret ?? false);
+    if (!answer && !allowsOther) return false;
+    if (answer === "__other__" || (!answer && allowsOther)) {
+      return (otherTexts[questionKey] || "").trim().length > 0;
     }
     return true;
   });
@@ -68,21 +88,25 @@ export function QuestionAnswerPanel({
 
   const handleSelectOption = useCallback(
     (optionLabel: string) => {
-      if (!currentQuestion) return;
+      if (!currentQuestion || !currentQuestionKey) return;
       setAnswers((prev) => ({
         ...prev,
-        [currentQuestion.question]: optionLabel,
+        [currentQuestionKey]: optionLabel,
       }));
     },
-    [currentQuestion],
+    [currentQuestion, currentQuestionKey],
   );
 
   const handleOtherTextChange = useCallback(
     (text: string) => {
-      if (!currentQuestion) return;
-      setOtherText(currentQuestion.question, text);
+      if (!currentQuestion || !currentQuestionKey) return;
+      setOtherText(currentQuestionKey, text);
+      setAnswers((prev) => ({
+        ...prev,
+        [currentQuestionKey]: "__other__",
+      }));
     },
-    [currentQuestion, setOtherText],
+    [currentQuestion, currentQuestionKey, setOtherText],
   );
 
   const advanceToNext = useCallback(() => {
@@ -97,11 +121,14 @@ export function QuestionAnswerPanel({
     // Build final answers, replacing __other__ with actual text
     const finalAnswers: Record<string, string> = {};
     for (const q of questions) {
-      const answer = answers[q.question];
+      const questionKey = getQuestionKey(q);
+      const answer = answers[questionKey];
       if (answer === "__other__") {
-        finalAnswers[q.question] = otherTexts[q.question] || "";
+        finalAnswers[questionKey] = otherTexts[questionKey] || "";
       } else if (answer) {
-        finalAnswers[q.question] = answer;
+        finalAnswers[questionKey] = answer;
+      } else if (q.options.length === 0 || q.allowOther || q.isSecret) {
+        finalAnswers[questionKey] = otherTexts[questionKey] || "";
       }
     }
 
@@ -150,7 +177,7 @@ export function QuestionAnswerPanel({
         const hasCurrentAnswer = currentAnswer && currentAnswer !== "__other__";
         const hasOtherAnswer =
           currentAnswer === "__other__" &&
-          (otherTexts[currentQuestion?.question || ""] || "").trim().length > 0;
+          (otherTexts[currentQuestionKey || ""] || "").trim().length > 0;
 
         if (hasCurrentAnswer || hasOtherAnswer) {
           e.preventDefault();
@@ -179,6 +206,7 @@ export function QuestionAnswerPanel({
     submitting,
     currentAnswer,
     currentQuestion,
+    currentQuestionKey,
     otherTexts,
     isLastQuestion,
     allAnswered,
@@ -235,10 +263,10 @@ export function QuestionAnswerPanel({
           <div className="question-tabs">
             {questions.map((q, idx) => {
               const isActive = idx === currentTab;
-              const isAnswered = !!answers[q.question];
+              const isAnswered = !!answers[getQuestionKey(q)];
               return (
                 <button
-                  key={q.question}
+                  key={getQuestionKey(q)}
                   type="button"
                   className={`question-tab ${isActive ? "active" : ""} ${isAnswered ? "answered" : ""}`}
                   onClick={() => setCurrentTab(idx)}
@@ -289,29 +317,31 @@ export function QuestionAnswerPanel({
                 })}
 
                 {/* Other option */}
-                <button
-                  type="button"
-                  className={`question-option-btn other ${isOtherSelected ? "selected" : ""}`}
-                  onClick={() => handleSelectOption("__other__")}
-                >
-                  <span className="question-option-radio">
-                    {isOtherSelected ? "●" : "○"}
-                  </span>
-                  <div className="question-option-text">
-                    <span className="question-option-label">
-                      {t("questionPanelOther")}
+                {currentAllowsOther && hasSelectableOptions && (
+                  <button
+                    type="button"
+                    className={`question-option-btn other ${isOtherSelected ? "selected" : ""}`}
+                    onClick={() => handleSelectOption("__other__")}
+                  >
+                    <span className="question-option-radio">
+                      {isOtherSelected ? "●" : "○"}
                     </span>
-                  </div>
-                </button>
+                    <div className="question-option-text">
+                      <span className="question-option-label">
+                        {t("questionPanelOther")}
+                      </span>
+                    </div>
+                  </button>
+                )}
 
                 {/* Other text input */}
-                {isOtherSelected && (
+                {isOtherSelected && currentQuestionKey && (
                   <div className="question-other-input">
                     <input
                       ref={otherInputRef}
-                      type="text"
+                      type={currentQuestion.isSecret ? "password" : "text"}
                       placeholder={t("questionPanelTypeAnswer")}
-                      value={otherTexts[currentQuestion.question] || ""}
+                      value={otherTexts[currentQuestionKey] || ""}
                       onChange={(e) => handleOtherTextChange(e.target.value)}
                     />
                   </div>
@@ -347,7 +377,14 @@ export function QuestionAnswerPanel({
                 type="button"
                 className="question-btn next"
                 onClick={advanceToNext}
-                disabled={!currentAnswer || submitting}
+                disabled={
+                  (!currentAnswer &&
+                    !(currentAllowsOther && isOtherSelected)) ||
+                  (isOtherSelected &&
+                    (otherTexts[currentQuestionKey || ""] || "").trim()
+                      .length === 0) ||
+                  submitting
+                }
               >
                 {t("questionPanelNext")}
                 <kbd>↵</kbd>

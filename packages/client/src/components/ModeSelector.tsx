@@ -1,3 +1,4 @@
+import type { ProviderName } from "@yep-anywhere/shared";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useI18n } from "../i18n";
@@ -10,19 +11,13 @@ const MODE_ORDER: PermissionMode[] = [
   "bypassPermissions",
 ];
 
-const MODE_LABELS: Record<PermissionMode, string> = {
-  default: "Ask before edits",
-  acceptEdits: "Edit automatically",
-  plan: "Plan mode",
-  bypassPermissions: "Bypass permissions",
-};
-
 // Breakpoint for desktop behavior (should match CSS)
 const DESKTOP_BREAKPOINT = 769;
 
 interface ModeSelectorProps {
   mode: PermissionMode;
   onModeChange: (mode: PermissionMode) => void;
+  provider?: ProviderName;
   disabled?: boolean;
   /** Whether the session is currently held (soft pause) */
   isHeld?: boolean;
@@ -38,6 +33,7 @@ interface ModeSelectorProps {
 export function ModeSelector({
   mode,
   onModeChange,
+  provider,
   disabled,
   isHeld = false,
   onHoldChange,
@@ -146,9 +142,31 @@ export function ModeSelector({
     }
   };
 
+  const modeLabels: Record<PermissionMode, string> = {
+    default:
+      provider === "codex"
+        ? t("modeCodexDefaultLabel" as never)
+        : t("modeDefaultLabel" as never),
+    acceptEdits:
+      provider === "codex"
+        ? t("modeCodexAcceptEditsLabel" as never)
+        : t("modeAcceptEditsLabel" as never),
+    plan:
+      provider === "codex"
+        ? t("modeCodexPlanLabel" as never)
+        : t("modePlanLabel" as never),
+    bypassPermissions:
+      provider === "codex"
+        ? t("modeCodexBypassPermissionsLabel" as never)
+        : t("modeBypassPermissionsLabel" as never),
+  };
+
   // Display text: show "Hold" when held, otherwise show mode label
-  const displayLabel = isHeld ? t("modeHold" as never) : MODE_LABELS[mode];
-  const displayDotClass = isHeld ? "mode-hold" : `mode-${mode}`;
+  const displayMode = provider === "codex" && mode === "plan" ? "default" : mode;
+  const displayLabel = isHeld ? t("modeHold" as never) : modeLabels[displayMode];
+  const displayDotClass = isHeld ? "mode-hold" : `mode-${displayMode}`;
+  const visibleModes =
+    provider === "codex" ? MODE_ORDER.filter((m) => m !== "plan") : MODE_ORDER;
 
   // Shared options content used by both mobile sheet and desktop dropdown
   const optionsContent = (
@@ -194,7 +212,7 @@ export function ModeSelector({
       {onHoldChange && <div className="mode-selector-divider" />}
 
       {/* Permission mode options */}
-      {MODE_ORDER.map((m) => (
+      {visibleModes.map((m) => (
         <button
           key={m}
           type="button"
@@ -203,7 +221,7 @@ export function ModeSelector({
           aria-pressed={!isHeld && mode === m}
         >
           <span className={`mode-dot mode-${m}`} />
-          <span className="mode-selector-label">{MODE_LABELS[m]}</span>
+          <span className="mode-selector-label">{modeLabels[m]}</span>
           {!isHeld && mode === m && (
             <span className="mode-selector-check" aria-hidden="true">
               <svg

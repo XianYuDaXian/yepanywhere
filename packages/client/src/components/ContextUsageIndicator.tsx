@@ -8,6 +8,8 @@ interface ContextUsageIndicatorProps {
   size?: number;
   /** Whether to show the percentage label (default: true) */
   showLabel?: boolean;
+  /** 点击后显示详细信息 */
+  onClick?: () => void;
 }
 
 /**
@@ -18,6 +20,7 @@ export function ContextUsageIndicator({
   usage,
   size = 16,
   showLabel = true,
+  onClick,
 }: ContextUsageIndicatorProps) {
   const { t } = useI18n();
   if (!usage) return null;
@@ -50,8 +53,8 @@ export function ContextUsageIndicator({
         used: formatTokens(usage.inputTokens),
       });
 
-  return (
-    <span className="context-usage-indicator" title={tooltip}>
+  const content = (
+    <>
       <svg
         width={size}
         height={size}
@@ -84,6 +87,25 @@ export function ContextUsageIndicator({
       {showLabel && (
         <span className="context-usage-label">{clampedPercentage}%</span>
       )}
+    </>
+  );
+
+  if (onClick) {
+    return (
+      <button
+        type="button"
+        className="context-usage-indicator context-usage-button"
+        title={tooltip}
+        onClick={onClick}
+      >
+        {content}
+      </button>
+    );
+  }
+
+  return (
+    <span className="context-usage-indicator" title={tooltip}>
+      {content}
     </span>
   );
 }

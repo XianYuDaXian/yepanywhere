@@ -231,11 +231,20 @@ function UploadedFileItem({ file }: { file: UploadedFileInfo }) {
       <>
         <button
           type="button"
-          className="uploaded-file uploaded-file-clickable"
+          className="uploaded-file uploaded-file-clickable uploaded-image-preview-button"
           title={`${file.mimeType}, ${file.size}`}
           onClick={() => setShowModal(true)}
         >
-          📎 {file.originalName}
+          {imageUrl ? (
+            <img
+              className="uploaded-image-preview"
+              src={imageUrl}
+              alt={file.originalName}
+            />
+          ) : (
+            <span className="uploaded-image-preview-placeholder">📎</span>
+          )}
+          <span>{file.originalName}</span>
         </button>
         {showModal && (
           <Modal title={file.originalName} onClose={() => setShowModal(false)}>

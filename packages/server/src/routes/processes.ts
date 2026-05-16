@@ -233,5 +233,25 @@ export function createProcessesRoutes(deps: ProcessesDeps): Hono {
     return c.json({ success: true, model: body.model });
   });
 
+  // POST /api/processes/:processId/compact - Trigger manual context compaction
+  routes.post("/:processId/compact", async (c) => {
+    const processId = c.req.param("processId");
+
+    const process = deps.supervisor.getProcess(processId);
+    if (!process) {
+      return c.json({ error: "Process not found" }, 404);
+    }
+
+    const success = await process.compact();
+    if (!success) {
+      return c.json(
+        { error: "Context compaction not supported for this process" },
+        400,
+      );
+    }
+
+    return c.json({ success: true });
+  });
+
   return routes;
 }

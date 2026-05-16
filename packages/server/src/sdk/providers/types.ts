@@ -1,5 +1,6 @@
 // Provider abstraction types for multi-provider support
 import type {
+  CodexRateLimits,
   ModelInfo,
   PermissionMode,
   SlashCommand,
@@ -47,6 +48,8 @@ export interface StartSessionOptions {
   resumeSessionId?: string;
   /** Permission mode for tool approvals */
   permissionMode?: PermissionMode;
+  /** Whether the provider should use planning collaboration behavior. */
+  planMode?: boolean;
   /** Model to use (e.g., "sonnet", "opus", "haiku") */
   model?: string;
   /** Thinking configuration (undefined = thinking disabled) */
@@ -112,6 +115,12 @@ export interface AgentSession {
    * Only supported by Claude SDK 0.2.7+.
    */
   setModel?: (model?: string) => Promise<void>;
+  /** 手动触发当前会话的上下文压缩。 */
+  compact?: () => Promise<void>;
+  /** 在提供方支持时同步当前权限模式。 */
+  setPermissionMode?: (mode: PermissionMode) => Promise<void> | void;
+  /** 在提供方支持时同步计划模式。 */
+  setPlanMode?: (enabled: boolean) => Promise<void> | void;
 }
 
 /**
@@ -160,4 +169,7 @@ export interface AgentProvider {
    * For cloud providers (Claude, Gemini), this returns a static list.
    */
   getAvailableModels(): Promise<ModelInfo[]>;
+
+  /** 在提供方支持时读取实时账号限额。 */
+  getAccountRateLimits?(): Promise<CodexRateLimits | null>;
 }

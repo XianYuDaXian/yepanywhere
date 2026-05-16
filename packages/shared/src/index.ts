@@ -130,6 +130,8 @@ export type {
   PendingInputType,
   AgentActivity,
   ContextUsage,
+  CodexRateLimitWindow,
+  CodexRateLimits,
   SessionOwnership,
   SessionSandboxPolicy,
   AppSessionSummary,

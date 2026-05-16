@@ -85,5 +85,22 @@ export function createProvidersRoutes(deps: ProviderRouteDeps = {}): Hono {
     return c.json({ provider: providerInfo });
   });
 
+  routes.get("/:name/rate-limits", async (c) => {
+    const name = c.req.param("name");
+    const providers = getAllProviders();
+    const provider = providers.find((p) => p.name === name);
+
+    if (!provider) {
+      return c.json({ error: "Provider not found" }, 404);
+    }
+
+    if (!provider.getAccountRateLimits) {
+      return c.json({ rateLimits: null });
+    }
+
+    const rateLimits = await provider.getAccountRateLimits();
+    return c.json({ rateLimits });
+  });
+
   return routes;
 }

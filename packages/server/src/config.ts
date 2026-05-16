@@ -269,7 +269,8 @@ export function loadConfig(): Config {
     cliPortOverride:
       process.env.CLI_PORT_OVERRIDE === "true" ||
       process.env.PORT !== undefined,
-    cliHostOverride: process.env.CLI_HOST_OVERRIDE === "true",
+    cliHostOverride:
+      process.env.CLI_HOST_OVERRIDE === "true" || process.env.HOST !== undefined,
     openBrowser: process.env.OPEN_BROWSER === "true",
     httpsSelfSigned: process.env.HTTPS_SELF_SIGNED === "true",
     desktopAuthToken: process.env.DESKTOP_AUTH_TOKEN || undefined,
