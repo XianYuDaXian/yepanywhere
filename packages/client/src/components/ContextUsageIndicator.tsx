@@ -1,3 +1,4 @@
+import type { Ref } from "react";
 import { useI18n } from "../i18n";
 import type { ContextUsage } from "../types";
 
@@ -10,6 +11,8 @@ interface ContextUsageIndicatorProps {
   showLabel?: boolean;
   /** 点击后显示详细信息 */
   onClick?: () => void;
+  /** 可点击按钮的 DOM 引用，用于贴边浮层定位 */
+  buttonRef?: Ref<HTMLButtonElement>;
 }
 
 /**
@@ -21,6 +24,7 @@ export function ContextUsageIndicator({
   size = 16,
   showLabel = true,
   onClick,
+  buttonRef,
 }: ContextUsageIndicatorProps) {
   const { t } = useI18n();
   if (!usage) return null;
@@ -99,6 +103,7 @@ export function ContextUsageIndicator({
         className="context-usage-indicator context-usage-button"
         title={tooltip}
         onClick={onClick}
+        ref={buttonRef}
       >
         {content}
       </button>

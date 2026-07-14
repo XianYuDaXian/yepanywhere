@@ -16,7 +16,6 @@ import type {
 import { MessageInputToolbar } from "../components/MessageInputToolbar";
 import { MessageList } from "../components/MessageList";
 import { ModelSwitchModal } from "../components/ModelSwitchModal";
-import { ContextUsageModal } from "../components/ContextUsageModal";
 import { ProcessInfoModal } from "../components/ProcessInfoModal";
 import { ProviderBadge } from "../components/ProviderBadge";
 import { QuestionAnswerPanel } from "../components/QuestionAnswerPanel";
@@ -396,8 +395,6 @@ function SessionPageContent({
 
 // Process info modal state
   const [showProcessInfoModal, setShowProcessInfoModal] = useState(false);
-  // 上下文占用轻量弹层（输入区右下角点击）
-  const [showContextUsageModal, setShowContextUsageModal] = useState(false);
 
   // Model switch modal state
   const [showSkillModal, setShowSkillModal] = useState(false);
@@ -1556,14 +1553,6 @@ const appendToDraft = useCallback((value: string) => {
           />
         )}
 
-        {/* 输入区上下文占用轻量弹层 */}
-        {showContextUsageModal && (
-          <ContextUsageModal
-            usage={session?.contextUsage}
-            onClose={() => setShowContextUsageModal(false)}
-          />
-        )}
-
         {showSkillModal && session?.provider === "codex" && (
           <CodexSkillModal
             projectId={projectId}
@@ -1713,8 +1702,7 @@ deferredMessages={deferredMessages}
                         : undefined
                     }
 contextUsage={session?.contextUsage}
-                    onContextUsageClick={() => setShowContextUsageModal(true)}
-                    isRunning={status.owner === "self"}
+                                        isRunning={status.owner === "self"}
                     isThinking={processState === "in-turn"}
                     onStop={handleAbort}
                     pendingApproval={
@@ -1798,8 +1786,7 @@ contextUsage={session?.contextUsage}
                   )
                 }
 contextUsage={session?.contextUsage}
-                onContextUsageClick={() => setShowContextUsageModal(true)}
-                projectId={projectId}
+                                projectId={projectId}
                 sessionId={sessionId}
                 attachments={attachments}
                 onAttach={handleAttach}

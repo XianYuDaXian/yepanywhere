@@ -5,12 +5,13 @@ import type {
   ThinkingMode,
   UploadedFile,
 } from "@yep-anywhere/shared";
-import type { ReactNode, RefObject } from "react";
+import { useRef, useState, type ReactNode, type RefObject } from "react";
 import type { ThinkingOption } from "../hooks/useModelSettings";
 import { useModelSettings } from "../hooks/useModelSettings";
 import { useI18n } from "../i18n";
 import type { ContextUsage, PermissionMode } from "../types";
 import { ContextUsageIndicator } from "./ContextUsageIndicator";
+import { ContextUsageModal } from "./ContextUsageModal";
 import { FilterDropdown, type FilterOption } from "./FilterDropdown";
 import { ModeSelector } from "./ModeSelector";
 import { SlashCommandButton } from "./SlashCommandButton";
@@ -119,7 +120,7 @@ export function MessageInputToolbar({
   onSlashMenuOpenChange,
   renderSlashMenu,
   contextUsage,
-  onContextUsageClick,
+  onContextUsageClick: _onContextUsageClick,
   isRunning,
   isThinking,
   onStop,
@@ -140,6 +141,8 @@ export function MessageInputToolbar({
   const thinkingMode = thinkingModeOverride ?? storedThinkingMode;
   const thinkingLevel = effortLevelOverride ?? storedThinkingLevel;
   const isCodex = provider === "codex";
+  const [showContextUsagePopover, setShowContextUsagePopover] = useState(false);
+  const contextUsageButtonRef = useRef<HTMLButtonElement | null>(null);
   const handleThinkingClick = onThinkingClick ?? cycleThinkingMode;
   const thinkingLabel =
     thinkingMode === "off"
@@ -441,9 +444,17 @@ export function MessageInputToolbar({
         <ContextUsageIndicator
           usage={contextUsage}
           size={16}
-          onClick={onContextUsageClick}
+          buttonRef={contextUsageButtonRef}
+          onClick={() => setShowContextUsagePopover((open) => !open)}
         />
       </div>
+      {showContextUsagePopover && (
+        <ContextUsageModal
+          usage={contextUsage}
+          anchorRef={contextUsageButtonRef}
+          onClose={() => setShowContextUsagePopover(false)}
+        />
+      )}
     </div>
   );
 }
