@@ -984,7 +984,9 @@
   "deferredActionReuse": "再发一条修正",
   "deferredEditLabel": "编辑排队消息",
   "deferredEditEmpty": "内容不能为空",
-  "deferredUpdateFailed": "更新排队消息失败：{message}",
+"deferredUpdateFailed": "更新排队消息失败：{message}",
   "deferredSteerFailed": "改为引导失败：{message}",
-  "deferredCancelFailed": "取消失败：{message}"
+  "deferredCancelFailed": "取消失败：{message}",
+  "contextUsageModalTitle": "上下文占用",
+  "contextUsageModalEmpty": "暂无上下文占用数据"
 }

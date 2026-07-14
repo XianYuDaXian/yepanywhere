@@ -984,7 +984,9 @@
   "deferredActionReuse": "Reuse as correction",
   "deferredEditLabel": "Edit queued message",
   "deferredEditEmpty": "Content cannot be empty",
-  "deferredUpdateFailed": "Failed to update queued message: {message}",
+"deferredUpdateFailed": "Failed to update queued message: {message}",
   "deferredSteerFailed": "Failed to steer message: {message}",
-  "deferredCancelFailed": "Failed to cancel: {message}"
+  "deferredCancelFailed": "Failed to cancel: {message}",
+  "contextUsageModalTitle": "Context usage",
+  "contextUsageModalEmpty": "No context usage data yet"
 }

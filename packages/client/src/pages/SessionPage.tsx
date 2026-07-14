@@ -16,6 +16,7 @@ import type {
 import { MessageInputToolbar } from "../components/MessageInputToolbar";
 import { MessageList } from "../components/MessageList";
 import { ModelSwitchModal } from "../components/ModelSwitchModal";
+import { ContextUsageModal } from "../components/ContextUsageModal";
 import { ProcessInfoModal } from "../components/ProcessInfoModal";
 import { ProviderBadge } from "../components/ProviderBadge";
 import { QuestionAnswerPanel } from "../components/QuestionAnswerPanel";
@@ -393,8 +394,10 @@ function SessionPageContent({
   // Approval panel collapsed state (separate from message input collapse)
   const [approvalCollapsed, setApprovalCollapsed] = useState(false);
 
-  // Process info modal state
+// Process info modal state
   const [showProcessInfoModal, setShowProcessInfoModal] = useState(false);
+  // 上下文占用轻量弹层（输入区右下角点击）
+  const [showContextUsageModal, setShowContextUsageModal] = useState(false);
 
   // Model switch modal state
   const [showSkillModal, setShowSkillModal] = useState(false);
@@ -1531,7 +1534,7 @@ const appendToDraft = useCallback((value: string) => {
           </div>
         </header>
 
-        {/* Process Info Modal */}
+{/* Process Info Modal */}
         {showProcessInfoModal && session && (
           <ProcessInfoModal
             sessionId={actualSessionId}
@@ -1550,6 +1553,14 @@ const appendToDraft = useCallback((value: string) => {
             sessionStreamConnected={sessionUpdatesConnected}
             lastSessionEventAt={lastStreamActivityAt}
             onClose={() => setShowProcessInfoModal(false)}
+          />
+        )}
+
+        {/* 输入区上下文占用轻量弹层 */}
+        {showContextUsageModal && (
+          <ContextUsageModal
+            usage={session?.contextUsage}
+            onClose={() => setShowContextUsageModal(false)}
           />
         )}
 
@@ -1701,8 +1712,8 @@ deferredMessages={deferredMessages}
                         ? handleReasoningSelect
                         : undefined
                     }
-                    contextUsage={session?.contextUsage}
-                    onContextUsageClick={() => setShowProcessInfoModal(true)}
+contextUsage={session?.contextUsage}
+                    onContextUsageClick={() => setShowContextUsageModal(true)}
                     isRunning={status.owner === "self"}
                     isThinking={processState === "in-turn"}
                     onStop={handleAbort}
@@ -1786,8 +1797,8 @@ deferredMessages={deferredMessages}
                     pendingInputRequest.sessionId === actualSessionId
                   )
                 }
-                contextUsage={session?.contextUsage}
-                onContextUsageClick={() => setShowProcessInfoModal(true)}
+contextUsage={session?.contextUsage}
+                onContextUsageClick={() => setShowContextUsageModal(true)}
                 projectId={projectId}
                 sessionId={sessionId}
                 attachments={attachments}

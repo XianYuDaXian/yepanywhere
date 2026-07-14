@@ -1346,6 +1346,36 @@ details[open] .collapsible__icon {
   color: var(--error-color);
 }
 
+/* 轻量上下文占用弹层：比完整会话信息更紧凑 */
+.modal:has(.context-usage-modal) {
+  max-width: 22rem;
+  width: min(92vw, 22rem);
+}
+
+.context-usage-modal {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.context-usage-modal .process-info-section {
+  margin: 0;
+  padding: 0;
+  border: none;
+}
+
+.context-usage-modal-empty {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--font-size-sm);
+}
+
+@media (max-width: 600px) {
+  .modal:has(.context-usage-modal) {
+    max-width: min(94vw, 22rem);
+  }
+}
+
 @media (max-width: 600px) {
   .process-info-content {
     padding: 0.5rem;
