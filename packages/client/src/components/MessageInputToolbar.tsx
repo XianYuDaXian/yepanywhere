@@ -66,9 +66,13 @@ export interface MessageInputToolbarProps {
   isRunning?: boolean;
   isThinking?: boolean;
   onStop?: () => void;
-  onSend?: () => void;
+  onSend?: (() => void) | ((event?: unknown) => void);
   /** Queue a deferred message. Only provided when agent is running. */
   onQueue?: () => void;
+  /** Interrupt current run then send immediately. Only for Codex while running. */
+  onBargeIn?: () => void;
+  /** Running-time primary action label: send / queue / steer. */
+  primaryActionLabel?: string;
   canSend?: boolean;
   disabled?: boolean;
 
@@ -118,6 +122,8 @@ export function MessageInputToolbar({
   onStop,
   onSend,
   onQueue,
+  onBargeIn,
+  primaryActionLabel,
   canSend,
   disabled,
   pendingApproval,
@@ -259,6 +265,18 @@ export function MessageInputToolbar({
               </svg>
             </button>
           )}
+          {/* Barge-in button - secondary action while Codex is running */}
+          {onBargeIn && canSend && (
+            <button
+              type="button"
+              onClick={onBargeIn}
+              className="barge-in-button"
+              title={t("toolbarBargeInTitle")}
+              aria-label={t("toolbarBargeInLabel")}
+            >
+              <span className="barge-in-label">{t("toolbarBargeIn")}</span>
+            </button>
+          )}
           {/* Show stop button when thinking and nothing to send, otherwise show send */}
           {isRunning && onStop && isThinking && !canSend ? (
             <button
@@ -275,9 +293,13 @@ export function MessageInputToolbar({
               onClick={onSend}
               disabled={disabled || !canSend}
               className="send-button"
-              aria-label={t("toolbarSend")}
+              aria-label={primaryActionLabel ?? t("toolbarSend")}
             >
-              <span className="send-icon">↑</span>
+              {primaryActionLabel ? (
+                <span className="send-label">{primaryActionLabel}</span>
+              ) : (
+                <span className="send-icon">↑</span>
+              )}
             </button>
           ) : null}
         </div>

@@ -940,5 +940,15 @@
   "remoteSetupErrorPasswordMismatch": "Passwörter stimmen nicht überein",
   "remoteSetupErrorCustomRelayRequired": "Benutzerdefinierte Relay-URL ist erforderlich",
   "remoteSetupErrorSaveFailed": "Speichern fehlgeschlagen",
-  "remoteSetupErrorUpdateFailed": "Aktualisierung fehlgeschlagen"
+  "remoteSetupErrorUpdateFailed": "Aktualisierung fehlgeschlagen",
+  "toolbarSteer": "Steuern",
+  "toolbarBargeIn": "Einschieben",
+  "toolbarBargeInTitle": "Lauf unterbrechen und sofort senden",
+  "toolbarBargeInLabel": "Einschieben",
+  "followUpBehaviorTitle": "Folgeverhalten",
+  "followUpBehaviorQueue": "Warteschlange",
+  "followUpBehaviorSteer": "Steuern",
+  "followUpBehaviorDescription": "Während der Ausführung Folgeanweisungen in die Warteschlange stellen oder den aktuellen Lauf steuern. Mit Strg+Umschalt die Aktion für eine einzelne Nachricht umkehren.",
+  "sessionBargeInFailed": "Einschieben fehlgeschlagen: {message}",
+  "sessionBargeInNotInterrupted": "Einschieben fehlgeschlagen: der aktuelle Lauf konnte nicht unterbrochen werden"
 }

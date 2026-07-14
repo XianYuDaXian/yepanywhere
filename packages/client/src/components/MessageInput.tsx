@@ -24,6 +24,13 @@ import { hasCoarsePointer } from "../lib/deviceDetection";
 import type { ContextUsage, PermissionMode } from "../types";
 import { MessageInputToolbar } from "./MessageInputToolbar";
 import type { VoiceInputButtonRef } from "./VoiceInputButton";
+import { FollowUpBehaviorControl } from "./FollowUpBehaviorControl";
+import {
+  type FollowUpBehavior,
+  loadFollowUpBehavior,
+  resolveSendBehavior,
+  saveFollowUpBehavior,
+} from "../lib/followUpBehavior";
 
 /** Progress info for an in-flight upload */
 export interface UploadProgress {
@@ -83,7 +90,10 @@ function getSlashQueryState(
 }
 
 interface Props {
-  onSend: (text: string) => void;
+  onSend: (
+    text: string,
+    options?: { behavior?: FollowUpBehavior | "barge-in" },
+  ) => void;
   /** Queue a deferred message (sent when agent's turn ends). Only provided when agent is running. */
   onQueue?: (text: string) => void;
   disabled?: boolean;
@@ -187,6 +197,12 @@ export function MessageInput({
   const [slashQueryState, setSlashQueryState] = useState<SlashQueryState | null>(
     null,
   );
+  // Codex 运行中跟进行为（排队 / 引导），跨会话持久化
+  const [followUpBehavior, setFollowUpBehavior] = useState<FollowUpBehavior>(
+    () => loadFollowUpBehavior(),
+  );
+  const isCodex = provider === "codex";
+  const showFollowUpControls = isCodex && !!isRunning;
 
   // Combined display text: committed text + interim transcript
   const displayText = interimTranscript
@@ -235,46 +251,68 @@ export function MessageInput({
     onDraftControlsReady?.(controls);
   }, [controls, onDraftControlsReady]);
 
-  const handleSubmit = useCallback(() => {
-    // Stop voice recording and get any pending interim text
+  const handleFollowUpBehaviorChange = useCallback((value: FollowUpBehavior) => {
+    setFollowUpBehavior(value);
+    saveFollowUpBehavior(value);
+  }, []);
+
+  /** 收集当前输入内容并清空输入框，返回待发送文本。 */
+  const collectAndClearInput = useCallback(() => {
+    // 停止语音并合并未提交的 interim 文本
     const pendingVoice = voiceButtonRef.current?.stopAndFinalize() ?? "";
 
-    // Combine committed text with any pending voice text
     let finalText = text.trimEnd();
     if (pendingVoice) {
       finalText = finalText ? `${finalText} ${pendingVoice}` : pendingVoice;
     }
 
     const hasContent = finalText.trim() || attachments.length > 0;
-    if (hasContent && !disabled) {
-      const message = finalText.trim();
-      // Clear input state but keep localStorage for failure recovery
-      controls.clearInput();
-      setInterimTranscript("");
+    if (!hasContent || disabled) return null;
+
+    const message = finalText.trim();
+    // 清空输入状态，localStorage 草稿保留以便失败恢复
+    controls.clearInput();
+    setInterimTranscript("");
+    textareaRef.current?.focus();
+    return message;
+  }, [text, disabled, controls, attachments.length]);
+
+  const handleSubmit = useCallback(
+    (options?: { invertOnce?: boolean; behavior?: FollowUpBehavior | "barge-in" }) => {
+      const message = collectAndClearInput();
+      if (message === null) return;
+
+      // Codex 运行中按跟进行为分流；空闲或其它 provider 走普通发送
+      if (showFollowUpControls) {
+        const behavior =
+          options?.behavior ??
+          resolveSendBehavior(followUpBehavior, {
+            invertOnce: options?.invertOnce,
+          });
+        onSend(message, { behavior });
+        return;
+      }
+
       onSend(message);
-      // Refocus the textarea so user can continue typing
-      textareaRef.current?.focus();
-    }
-  }, [text, disabled, controls, onSend, attachments.length]);
+    },
+    [
+      collectAndClearInput,
+      showFollowUpControls,
+      followUpBehavior,
+      onSend,
+    ],
+  );
 
   const handleQueue = useCallback(() => {
-    // Stop voice recording and get any pending interim text
-    const pendingVoice = voiceButtonRef.current?.stopAndFinalize() ?? "";
+    if (!onQueue) return;
+    const message = collectAndClearInput();
+    if (message === null) return;
+    onQueue(message);
+  }, [collectAndClearInput, onQueue]);
 
-    let finalText = text.trimEnd();
-    if (pendingVoice) {
-      finalText = finalText ? `${finalText} ${pendingVoice}` : pendingVoice;
-    }
-
-    const hasContent = finalText.trim() || attachments.length > 0;
-    if (hasContent && !disabled && onQueue) {
-      const message = finalText.trim();
-      controls.clearInput();
-      setInterimTranscript("");
-      onQueue(message);
-      textareaRef.current?.focus();
-    }
-  }, [text, disabled, controls, onQueue, attachments.length]);
+  const handleBargeIn = useCallback(() => {
+    handleSubmit({ behavior: "barge-in" });
+  }, [handleSubmit]);
 
   const handleKeyDown = (e: KeyboardEvent) => {
     if (slashQueryState && e.key === "Escape") {
@@ -309,8 +347,15 @@ export function MessageInput({
       // Skip Enter during IME composition (e.g. Chinese/Japanese/Korean input)
       if (e.nativeEvent.isComposing) return;
 
-      // Ctrl+Enter queues a deferred message when agent is running
-      if (onQueue && e.ctrlKey && !e.shiftKey) {
+      // Codex 运行中：Ctrl+Shift+Enter 对本条消息反转跟进行为
+      if (showFollowUpControls && e.ctrlKey && e.shiftKey) {
+        e.preventDefault();
+        handleSubmit({ invertOnce: true });
+        return;
+      }
+
+      // 非 Codex 或兼容路径：Ctrl+Enter 仍走 deferred 排队
+      if (onQueue && e.ctrlKey && !e.shiftKey && !showFollowUpControls) {
         e.preventDefault();
         handleQueue();
         return;
@@ -605,9 +650,24 @@ export function MessageInput({
             isRunning={isRunning}
             isThinking={isThinking}
             onStop={onStop}
-            onSend={handleSubmit}
+            onSend={() => handleSubmit()}
             onQueue={onQueue ? handleQueue : undefined}
+            onBargeIn={showFollowUpControls ? handleBargeIn : undefined}
+            primaryActionLabel={
+              showFollowUpControls
+                ? followUpBehavior === "steer"
+                  ? t("followUpBehaviorSteer")
+                  : t("followUpBehaviorQueue")
+                : undefined
+            }
             canSend={!!(text.trim() || attachments.length > 0)}
+            disabled={disabled}
+          />
+        )}
+        {!collapsed && showFollowUpControls && (
+          <FollowUpBehaviorControl
+            value={followUpBehavior}
+            onChange={handleFollowUpBehaviorChange}
             disabled={disabled}
           />
         )}

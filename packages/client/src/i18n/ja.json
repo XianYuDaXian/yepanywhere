@@ -940,5 +940,15 @@
   "remoteSetupErrorPasswordMismatch": "パスワードが一致しません",
   "remoteSetupErrorCustomRelayRequired": "カスタム Relay URL は必須です",
   "remoteSetupErrorSaveFailed": "保存に失敗しました",
-  "remoteSetupErrorUpdateFailed": "更新に失敗しました"
+  "remoteSetupErrorUpdateFailed": "更新に失敗しました",
+  "toolbarSteer": "誘導",
+  "toolbarBargeIn": "割込み",
+  "toolbarBargeInTitle": "現在の実行を中断してすぐに送信",
+  "toolbarBargeInLabel": "割込み送信",
+  "followUpBehaviorTitle": "フォローアップ動作",
+  "followUpBehaviorQueue": "キュー",
+  "followUpBehaviorSteer": "誘導",
+  "followUpBehaviorDescription": "実行中は後続指示をキューに入れるか、現在の実行を誘導します。Ctrl+Shift で単一メッセージの動作を反転できます。",
+  "sessionBargeInFailed": "割込みに失敗しました: {message}",
+  "sessionBargeInNotInterrupted": "割込みに失敗しました: 現在の実行を中断できませんでした"
 }

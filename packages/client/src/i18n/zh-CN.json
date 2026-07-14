@@ -940,5 +940,15 @@
   "remoteSetupErrorPasswordMismatch": "两次输入的密码不一致",
   "remoteSetupErrorCustomRelayRequired": "请输入自定义中继地址",
   "remoteSetupErrorSaveFailed": "保存失败",
-  "remoteSetupErrorUpdateFailed": "更新失败"
+  "remoteSetupErrorUpdateFailed": "更新失败",
+  "toolbarSteer": "引导",
+  "toolbarBargeIn": "插队",
+  "toolbarBargeInTitle": "中断当前运行后立即发送",
+  "toolbarBargeInLabel": "插队发送",
+  "followUpBehaviorTitle": "跟进行为",
+  "followUpBehaviorQueue": "排队",
+  "followUpBehaviorSteer": "引导",
+  "followUpBehaviorDescription": "在运行时将后续指令加入队列，或引导当前运行。按 Ctrl+Shift 可对单条消息执行相反操作。",
+  "sessionBargeInFailed": "插队失败：{message}",
+  "sessionBargeInNotInterrupted": "插队失败：当前运行未能中断"
 }

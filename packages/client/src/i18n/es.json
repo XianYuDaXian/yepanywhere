@@ -940,5 +940,15 @@
   "remoteSetupErrorPasswordMismatch": "Las contraseñas no coinciden",
   "remoteSetupErrorCustomRelayRequired": "La URL personalizada del relay es obligatoria",
   "remoteSetupErrorSaveFailed": "Error al guardar",
-  "remoteSetupErrorUpdateFailed": "Error al actualizar"
+  "remoteSetupErrorUpdateFailed": "Error al actualizar",
+  "toolbarSteer": "Guiar",
+  "toolbarBargeIn": "Interrumpir",
+  "toolbarBargeInTitle": "Interrumpir la ejecución actual y enviar de inmediato",
+  "toolbarBargeInLabel": "Interrumpir",
+  "followUpBehaviorTitle": "Comportamiento de seguimiento",
+  "followUpBehaviorQueue": "Cola",
+  "followUpBehaviorSteer": "Guiar",
+  "followUpBehaviorDescription": "Mientras se ejecuta, encola instrucciones posteriores o guía la ejecución actual. Pulsa Ctrl+Mayús para invertir la acción de un solo mensaje.",
+  "sessionBargeInFailed": "Error al interrumpir: {message}",
+  "sessionBargeInNotInterrupted": "Error al interrumpir: no se pudo interrumpir la ejecución actual"
 }

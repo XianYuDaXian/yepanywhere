@@ -48,6 +48,7 @@ import { useNavigationLayout } from "../layouts";
 import { preprocessMessages } from "../lib/preprocessMessages";
 import { generateUUID } from "../lib/uuid";
 import { getSessionDisplayTitle } from "../utils";
+import type { FollowUpBehavior } from "../lib/followUpBehavior";
 
 export function SessionPage() {
   const { projectId, sessionId } = useParams<{
@@ -588,6 +589,69 @@ function SessionPageContent({
       const errorMsg = err instanceof Error ? err.message : String(err);
       showToast(t("sessionQueueFailed", { message: errorMsg }), "error");
     }
+  };
+
+  /**
+   * Codex 运行中发送分流：
+   * - queue：deferred 排队
+   * - steer：直接 queueMessage，后端 in-turn 优先 steer
+   * - barge-in：interrupt 后立即发送
+   * 空闲时不走本函数。
+   */
+  const sendWhileRunning = async (
+    text: string,
+    behavior: FollowUpBehavior | "barge-in",
+  ) => {
+    if (behavior === "queue") {
+      await handleQueue(text);
+      return;
+    }
+
+    if (behavior === "steer") {
+      await handleSend(text);
+      return;
+    }
+
+    // barge-in：先中断当前 turn，再立即发送
+    if (status.owner !== "self" || !status.processId) {
+      showToast(t("sessionBargeInNotInterrupted"), "error");
+      draftControlsRef.current?.restoreFromStorage();
+      return;
+    }
+
+    try {
+      const result = await api.interruptProcess(status.processId);
+      if (!result.interrupted) {
+        showToast(t("sessionBargeInNotInterrupted"), "error");
+        draftControlsRef.current?.restoreFromStorage();
+        return;
+      }
+      // 给中断留出短窗口，再立刻发送，避免输入丢失
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      await handleSend(text);
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      showToast(t("sessionBargeInFailed", { message: errorMsg }), "error");
+      draftControlsRef.current?.restoreFromStorage();
+    }
+  };
+
+  /** MessageInput 统一发送入口：运行中按 behavior 分流，空闲普通发送。 */
+  const handleMessageSend = async (
+    text: string,
+    options?: { behavior?: FollowUpBehavior | "barge-in" },
+  ) => {
+    const isCodexRunning =
+      effectiveProvider === "codex" &&
+      status.owner === "self" &&
+      processState !== "idle";
+
+    if (isCodexRunning && options?.behavior) {
+      await sendWhileRunning(text, options.behavior);
+      return;
+    }
+
+    await handleSend(text);
   };
 
   const handleModelChanged = useCallback(
@@ -1419,7 +1483,7 @@ function SessionPageContent({
               !isAskUserQuestion
             ) && (
               <MessageInput
-                onSend={handleSend}
+                onSend={handleMessageSend}
                 onQueue={
                   status.owner !== "none" && processState !== "idle"
                     ? handleQueue

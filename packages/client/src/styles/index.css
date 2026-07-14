@@ -1908,6 +1908,18 @@ a.sidebar-nav-item {
     border-radius: 14px;
   }
 
+  .barge-in-button {
+    height: 40px;
+    min-height: 40px;
+    border-radius: 14px;
+  }
+
+  .send-button:has(.send-label) {
+    width: auto;
+    min-width: 40px;
+    padding: 0 0.85rem;
+  }
+
   .send-button {
     box-shadow: none;
   }
@@ -2305,6 +2317,114 @@ a.sidebar-nav-item {
 
 .queue-button:hover {
   opacity: 0.85;
+}
+
+.barge-in-button {
+  min-width: 36px;
+  height: 36px;
+  padding: 0 0.65rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(245, 190, 90, 0.55);
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: rgb(245, 190, 90);
+  cursor: pointer;
+  transition: opacity 0.15s, background 0.15s, border-color 0.15s;
+  flex-shrink: 0;
+}
+
+.barge-in-button:hover {
+  background: rgba(245, 190, 90, 0.12);
+  border-color: rgba(245, 190, 90, 0.8);
+}
+
+.barge-in-label {
+  font-size: var(--font-size-xs);
+  font-weight: 700;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.send-button .send-label {
+  font-size: var(--font-size-xs);
+  font-weight: 700;
+  line-height: 1;
+  white-space: nowrap;
+  padding: 0 0.15rem;
+}
+
+.send-button:has(.send-label) {
+  width: auto;
+  min-width: 40px;
+  padding: 0 0.75rem;
+}
+
+.follow-up-behavior-control {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 0.55rem 0.15rem 0;
+}
+
+.follow-up-behavior-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.follow-up-behavior-title {
+  font-size: var(--font-size-xs);
+  font-weight: 700;
+  color: var(--text-muted);
+}
+
+.follow-up-behavior-options {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.15rem;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.follow-up-behavior-option {
+  min-height: 28px;
+  padding: 0 0.75rem;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: var(--font-size-xs);
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.follow-up-behavior-option:hover:not(:disabled) {
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.follow-up-behavior-option.active {
+  background: rgba(16, 185, 129, 0.16);
+  color: var(--app-yep-green);
+}
+
+.follow-up-behavior-option:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.follow-up-behavior-description {
+  margin: 0;
+  font-size: 0.75rem;
+  line-height: 1.4;
+  color: var(--text-muted);
 }
 
 /* Deferred messages - queued server-side */
@@ -2862,6 +2982,18 @@ a.sidebar-nav-item {
     height: 44px;
     min-width: 44px;
     border-radius: 16px;
+  }
+
+  .barge-in-button {
+    height: 44px;
+    min-height: 44px;
+    border-radius: 16px;
+  }
+
+  .send-button:has(.send-label) {
+    width: auto;
+    min-width: 44px;
+    padding: 0 0.85rem;
   }
 
   .message-input-actions {

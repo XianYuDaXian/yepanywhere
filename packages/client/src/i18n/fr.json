@@ -940,5 +940,15 @@
   "remoteSetupErrorPasswordMismatch": "Les mots de passe ne correspondent pas",
   "remoteSetupErrorCustomRelayRequired": "L’URL de relais personnalisée est requise",
   "remoteSetupErrorSaveFailed": "Impossible d’enregistrer",
-  "remoteSetupErrorUpdateFailed": "Impossible de mettre à jour"
+  "remoteSetupErrorUpdateFailed": "Impossible de mettre à jour",
+  "toolbarSteer": "Guider",
+  "toolbarBargeIn": "Couper",
+  "toolbarBargeInTitle": "Interrompre l'exécution en cours et envoyer immédiatement",
+  "toolbarBargeInLabel": "Couper",
+  "followUpBehaviorTitle": "Comportement de suivi",
+  "followUpBehaviorQueue": "File",
+  "followUpBehaviorSteer": "Guider",
+  "followUpBehaviorDescription": "Pendant l'exécution, mettez les instructions suivantes en file ou guidez l'exécution en cours. Appuyez sur Ctrl+Maj pour inverser l'action d'un seul message.",
+  "sessionBargeInFailed": "Échec de l'interruption : {message}",
+  "sessionBargeInNotInterrupted": "Échec de l'interruption : l'exécution en cours n'a pas pu être interrompue"
 }
