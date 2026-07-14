@@ -25,9 +25,11 @@ export function ContextUsageIndicator({
   const { t } = useI18n();
   if (!usage) return null;
 
-  const { percentage } = usage;
-  // Clamp percentage to 0-100
-  const clampedPercentage = Math.min(100, Math.max(0, percentage));
+  // 主显示优先 occupancy，兼容旧 input/percentage 字段
+  const used = usage.occupancyTokens ?? usage.inputTokens;
+  const percent = usage.occupancyPercentage ?? usage.percentage;
+  // 将百分比限制在 0-100
+  const clampedPercentage = Math.min(100, Math.max(0, percent));
 
   // Calculate the stroke-dasharray for the pie chart
   // Circumference of circle with r=8 (for size=16) = 2 * PI * r
@@ -45,12 +47,12 @@ export function ContextUsageIndicator({
   const tooltip = usage.contextWindow
     ? t("contextTooltipWithWindow", {
         percentage: clampedPercentage,
-        used: formatTokens(usage.inputTokens),
+        used: formatTokens(used),
         total: formatTokens(usage.contextWindow),
       })
     : t("contextTooltipNoWindow", {
         percentage: clampedPercentage,
-        used: formatTokens(usage.inputTokens),
+        used: formatTokens(used),
       });
 
   const content = (

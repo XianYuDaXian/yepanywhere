@@ -356,24 +356,45 @@ export function ProcessInfoModal({
         {/* Context Usage - if available */}
         {contextUsage && (
           <Section title={t("processInfoSectionTokenUsage")}>
-            <InfoRow
-              label={t("processInfoLabelInputTokens")}
-              value={contextUsage.inputTokens.toLocaleString()}
-            />
-            {contextUsage.outputTokens !== undefined && (
+            {(() => {
+              // 主占用优先 occupancy，兼容旧 inputTokens/percentage
+              const occupancyTokens =
+                contextUsage.occupancyTokens ?? contextUsage.inputTokens;
+              const occupancyPercentage =
+                contextUsage.occupancyPercentage ?? contextUsage.percentage;
+              const occupancyValue =
+                contextUsage.contextWindow !== undefined
+                  ? `${occupancyTokens.toLocaleString()} / ${contextUsage.contextWindow.toLocaleString()} (${occupancyPercentage.toFixed(1)}%)`
+                  : `${occupancyTokens.toLocaleString()} (${occupancyPercentage.toFixed(1)}%)`;
+              return (
+                <InfoRow
+                  label={t("processInfoLabelContextOccupancy")}
+                  value={occupancyValue}
+                />
+              );
+            })()}
+            {contextUsage.turnInputTokens !== undefined && (
               <InfoRow
-                label={t("processInfoLabelOutputTokens")}
-                value={contextUsage.outputTokens.toLocaleString()}
+                label={t("processInfoLabelTurnInput")}
+                value={contextUsage.turnInputTokens.toLocaleString()}
               />
             )}
-            <InfoRow
-              label={t("processInfoLabelContextUsed")}
-              value={`${contextUsage.percentage.toFixed(1)}%`}
-            />
             {contextUsage.cacheReadTokens !== undefined && (
               <InfoRow
                 label={t("processInfoLabelCacheRead")}
                 value={contextUsage.cacheReadTokens.toLocaleString()}
+              />
+            )}
+            {contextUsage.totalTokens !== undefined && (
+              <InfoRow
+                label={t("processInfoLabelTotalTokens")}
+                value={contextUsage.totalTokens.toLocaleString()}
+              />
+            )}
+            {contextUsage.outputTokens !== undefined && (
+              <InfoRow
+                label={t("processInfoLabelOutputTokens")}
+                value={contextUsage.outputTokens.toLocaleString()}
               />
             )}
             {contextUsage.cacheCreationTokens !== undefined && (
