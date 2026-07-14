@@ -1,4 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 
 interface SlashCommandButtonProps {
   /** Available slash commands (without the "/" prefix) */
@@ -10,6 +16,8 @@ interface SlashCommandButtonProps {
   forceOpen?: boolean;
   query?: string;
   onOpenChange?: (open: boolean) => void;
+  /** 自定义菜单内容；提供时替换默认文字命令列表 */
+  renderMenu?: (args: { query: string; onClose: () => void }) => ReactNode;
 }
 
 /**
@@ -23,6 +31,7 @@ export function SlashCommandButton({
   forceOpen = false,
   query = "",
   onOpenChange,
+  renderMenu,
 }: SlashCommandButtonProps) {
   const [isOpen, setIsOpen] = useState(false);
   const buttonRef = useRef<HTMLButtonElement>(null);
@@ -85,8 +94,8 @@ export function SlashCommandButton({
     [onSelectCommand, setOpenState],
   );
 
-  // Don't render if no commands available
-  if (commands.length === 0) {
+  // 无自定义菜单且无可展示命令时不渲染按钮
+  if (!renderMenu && commands.length === 0) {
     return null;
   }
 
@@ -106,25 +115,33 @@ export function SlashCommandButton({
         <span className="slash-icon">/</span>
       </button>
       {open && (
-        <div
-          ref={menuRef}
-          className="slash-command-menu"
-          role="menu"
-          aria-label="Slash commands"
-        >
-          {visibleCommands.map((command) => (
-            <button
-              key={command}
-              type="button"
-              className="slash-command-item"
-              onClick={() => handleCommandClick(command)}
-              role="menuitem"
+        <div ref={menuRef} className="slash-command-menu-host">
+          {renderMenu ? (
+            renderMenu({
+              query,
+              onClose: () => setOpenState(false),
+            })
+          ) : (
+            <div
+              className="slash-command-menu"
+              role="menu"
+              aria-label="Slash commands"
             >
-              /{command}
-            </button>
-          ))}
-          {visibleCommands.length === 0 && (
-            <div className="slash-command-empty">No commands</div>
+              {visibleCommands.map((command) => (
+                <button
+                  key={command}
+                  type="button"
+                  className="slash-command-item"
+                  onClick={() => handleCommandClick(command)}
+                  role="menuitem"
+                >
+                  /{command}
+                </button>
+              ))}
+              {visibleCommands.length === 0 && (
+                <div className="slash-command-empty">No commands</div>
+              )}
+            </div>
           )}
         </div>
       )}

@@ -5,7 +5,7 @@ import type {
   ThinkingMode,
   UploadedFile,
 } from "@yep-anywhere/shared";
-import type { RefObject } from "react";
+import type { ReactNode, RefObject } from "react";
 import type { ThinkingOption } from "../hooks/useModelSettings";
 import { useModelSettings } from "../hooks/useModelSettings";
 import { useI18n } from "../i18n";
@@ -57,6 +57,8 @@ export interface MessageInputToolbarProps {
   slashMenuOpen?: boolean;
   slashMenuQuery?: string;
   onSlashMenuOpenChange?: (open: boolean) => void;
+  /** 自定义 slash 菜单；提供后替换默认命令列表 */
+  renderSlashMenu?: (args: { query: string; onClose: () => void }) => ReactNode;
 
   // Context usage
   contextUsage?: ContextUsage;
@@ -115,6 +117,7 @@ export function MessageInputToolbar({
   slashMenuOpen = false,
   slashMenuQuery = "",
   onSlashMenuOpenChange,
+  renderSlashMenu,
   contextUsage,
   onContextUsageClick,
   isRunning,
@@ -212,6 +215,7 @@ export function MessageInputToolbar({
               forceOpen={slashMenuOpen}
               query={slashMenuQuery}
               onOpenChange={onSlashMenuOpenChange}
+              renderMenu={renderSlashMenu}
             />
           )}
         </div>

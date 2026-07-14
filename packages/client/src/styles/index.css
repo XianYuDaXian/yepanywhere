@@ -3000,11 +3000,16 @@ a.sidebar-nav-item {
     gap: 0.625rem;
   }
 
+  .slash-command-menu-host,
   .slash-command-menu {
     position: fixed;
     left: 1rem;
     right: 1rem;
     bottom: calc(env(safe-area-inset-bottom, 0px) + 13.25rem);
+    margin-bottom: 0;
+  }
+
+  .slash-command-menu {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 0.5rem;
@@ -3013,6 +3018,16 @@ a.sidebar-nav-item {
     padding: 1rem;
     border-radius: 24px;
     background: color-mix(in srgb, var(--bg-surface) 94%, black 6%);
+  }
+
+  .codex-slash-panel {
+    width: 100%;
+    max-width: none;
+    max-height: min(50vh, 360px);
+    border: 1px solid var(--border-color);
+    border-radius: 24px;
+    background: color-mix(in srgb, var(--bg-surface) 94%, black 6%);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
   }
 
   .slash-command-item {
@@ -3061,6 +3076,96 @@ a.sidebar-nav-item {
 }
 
 .slash-command-empty {
+  padding: var(--space-2) var(--space-3);
+  color: var(--text-muted);
+  font-size: var(--font-size-sm);
+}
+
+.slash-command-menu-host {
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  margin-bottom: var(--space-1);
+  z-index: 100;
+}
+
+/* Codex 完整 slash 面板 */
+.codex-slash-panel {
+  position: relative;
+  bottom: auto;
+  left: auto;
+  margin-bottom: 0;
+  min-width: 280px;
+  max-width: min(420px, calc(100vw - 2rem));
+  max-height: min(360px, 50vh);
+  overflow-y: auto;
+  padding: var(--space-2) 0;
+}
+
+.codex-slash-section + .codex-slash-section {
+  margin-top: var(--space-1);
+  border-top: 1px solid var(--border-subtle);
+  padding-top: var(--space-1);
+}
+
+.codex-slash-section-title {
+  padding: var(--space-1) var(--space-3);
+  color: var(--text-muted);
+  font-size: var(--font-size-xs);
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.codex-slash-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.codex-slash-item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.15rem;
+  width: 100%;
+  padding: 0.55rem var(--space-3);
+  background: transparent;
+  border: none;
+  color: var(--text-primary);
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.codex-slash-item:hover:not(:disabled),
+.codex-slash-item.active:not(:disabled) {
+  background: var(--bg-hover);
+}
+
+.codex-slash-item:disabled,
+.codex-slash-item.disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.codex-slash-item-title {
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.codex-slash-skill-prefix {
+  color: var(--text-muted);
+  margin-right: 0.1rem;
+}
+
+.codex-slash-item-subtitle {
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+  line-height: 1.35;
+}
+
+.codex-slash-empty {
   padding: var(--space-2) var(--space-3);
   color: var(--text-muted);
   font-size: var(--font-size-sm);
@@ -8745,4 +8850,78 @@ a.sidebar-nav-item {
 
 .git-lines-deleted {
   color: var(--error-color);
+}
+
+/* Codex 完整 slash 面板 */
+.slash-command-menu-host {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 0;
+  z-index: 30;
+}
+
+.codex-slash-panel {
+  min-width: 280px;
+  max-width: min(420px, 90vw);
+  max-height: 360px;
+  overflow: auto;
+  border: 1px solid var(--border-color, #3c3c3c);
+  border-radius: 12px;
+  background: var(--bg-elevated, #1f1f1f);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+  padding: 8px;
+}
+
+.codex-slash-section + .codex-slash-section {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-color, #3c3c3c);
+}
+
+.codex-slash-section-title {
+  font-size: 12px;
+  color: var(--text-muted, #9d9d9d);
+  padding: 4px 8px 6px;
+}
+
+.codex-slash-item {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  border-radius: 8px;
+  padding: 8px;
+  cursor: pointer;
+}
+
+.codex-slash-item:hover,
+.codex-slash-item.active {
+  background: var(--list-hover-background, rgba(255, 255, 255, 0.06));
+}
+
+.codex-slash-item.disabled,
+.codex-slash-item:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.codex-slash-item-title {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.codex-slash-item-subtitle {
+  font-size: 12px;
+  color: var(--text-muted, #9d9d9d);
+}
+
+.codex-slash-empty {
+  font-size: 12px;
+  color: var(--text-muted, #9d9d9d);
+  padding: 8px;
 }

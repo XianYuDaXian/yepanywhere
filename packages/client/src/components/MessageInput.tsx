@@ -22,6 +22,12 @@ import {
 import { useI18n } from "../i18n";
 import { hasCoarsePointer } from "../lib/deviceDetection";
 import type { ContextUsage, PermissionMode } from "../types";
+import {
+  CodexSlashPanel,
+  type CodexSlashBuiltinId,
+  type CodexSlashBuiltinItem,
+  type CodexSlashSkillItem,
+} from "./CodexSlashPanel";
 import { MessageInputToolbar } from "./MessageInputToolbar";
 import type { VoiceInputButtonRef } from "./VoiceInputButton";
 import { FollowUpBehaviorControl } from "./FollowUpBehaviorControl";
@@ -145,6 +151,14 @@ interface Props {
   slashCommands?: string[];
   /** Callback for custom client-side commands (e.g., "model"). Return true if handled. */
   onCustomCommand?: (command: string) => boolean;
+  /** Codex 完整 slash 面板数据与动作；提供时替换纯文字命令列表 */
+  codexSlashPanel?: {
+    builtins: CodexSlashBuiltinItem[];
+    skills: CodexSlashSkillItem[];
+    loadingSkills?: boolean;
+    onSelectBuiltin: (id: CodexSlashBuiltinId) => void;
+    onSelectSkill: (name: string) => void;
+  };
 }
 
 export function MessageInput({
@@ -185,6 +199,7 @@ export function MessageInput({
   onThinkingChange,
   slashCommands = [],
   onCustomCommand,
+  codexSlashPanel,
 }: Props) {
   const { t } = useI18n();
   const [text, setText, controls] = useDraftPersistence(draftKey);
@@ -203,6 +218,7 @@ export function MessageInput({
   );
   const isCodex = provider === "codex";
   const showFollowUpControls = isCodex && !!isRunning;
+  const useCodexSlashPanel = isCodex && !!codexSlashPanel;
 
   // Combined display text: committed text + interim transcript
   const displayText = interimTranscript
@@ -323,6 +339,7 @@ export function MessageInput({
 
     if (
       slashQueryState &&
+      !useCodexSlashPanel &&
       e.key === "Enter" &&
       !e.shiftKey &&
       !e.ctrlKey &&
@@ -450,6 +467,32 @@ export function MessageInput({
   const handleInterimTranscript = useCallback((transcript: string) => {
     setInterimTranscript(transcript);
   }, []);
+
+  /** 清除输入框中的 /query token，并关闭 slash 面板状态。 */
+  const clearSlashToken = useCallback(() => {
+    if (slashQueryState) {
+      const nextText =
+        text.slice(0, slashQueryState.start) + text.slice(slashQueryState.end);
+      setText(nextText);
+    }
+    setSlashQueryState(null);
+  }, [setText, slashQueryState, text]);
+
+  const handleCodexBuiltinSelect = useCallback(
+    (id: CodexSlashBuiltinId) => {
+      clearSlashToken();
+      codexSlashPanel?.onSelectBuiltin(id);
+    },
+    [clearSlashToken, codexSlashPanel],
+  );
+
+  const handleCodexSkillSelect = useCallback(
+    (name: string) => {
+      clearSlashToken();
+      codexSlashPanel?.onSelectSkill(name);
+    },
+    [clearSlashToken, codexSlashPanel],
+  );
 
   // Handle slash command selection - insert command into text
   const handleSlashCommand = useCallback(
@@ -645,6 +688,21 @@ export function MessageInput({
                 setSlashQueryState(null);
               }
             }}
+            renderSlashMenu={
+              useCodexSlashPanel && codexSlashPanel
+                ? ({ query, onClose }) => (
+                    <CodexSlashPanel
+                      query={query}
+                      builtins={codexSlashPanel.builtins}
+                      skills={codexSlashPanel.skills}
+                      loadingSkills={codexSlashPanel.loadingSkills}
+                      onSelectBuiltin={handleCodexBuiltinSelect}
+                      onSelectSkill={handleCodexSkillSelect}
+                      onClose={onClose}
+                    />
+                  )
+                : undefined
+            }
             contextUsage={contextUsage}
             onContextUsageClick={onContextUsageClick}
             isRunning={isRunning}

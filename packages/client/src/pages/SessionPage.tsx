@@ -8,11 +8,18 @@ import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { api } from "../api/client";
 import { MessageInput, type UploadProgress } from "../components/MessageInput";
 import { CodexSkillModal } from "../components/CodexSkillModal";
+import type {
+  CodexSlashBuiltinId,
+  CodexSlashBuiltinItem,
+  CodexSlashSkillItem,
+} from "../components/CodexSlashPanel";
 import { MessageInputToolbar } from "../components/MessageInputToolbar";
 import { MessageList } from "../components/MessageList";
+import { ModelSwitchModal } from "../components/ModelSwitchModal";
 import { ProcessInfoModal } from "../components/ProcessInfoModal";
 import { ProviderBadge } from "../components/ProviderBadge";
 import { QuestionAnswerPanel } from "../components/QuestionAnswerPanel";
+import { ReasoningSettingsModal } from "../components/ReasoningSettingsModal";
 import { RecentSessionsDropdown } from "../components/RecentSessionsDropdown";
 import { SessionMenu } from "../components/SessionMenu";
 import { ToolApprovalPanel } from "../components/ToolApprovalPanel";
@@ -391,6 +398,10 @@ function SessionPageContent({
 
   // Model switch modal state
   const [showSkillModal, setShowSkillModal] = useState(false);
+  const [showModelModal, setShowModelModal] = useState(false);
+  const [showReasoningModal, setShowReasoningModal] = useState(false);
+  const [codexSkills, setCodexSkills] = useState<CodexSlashSkillItem[]>([]);
+  const [codexSkillsLoading, setCodexSkillsLoading] = useState(false);
 
   // Track user engagement to mark session as "seen"
   // Only enabled when not in external session (we own or it's idle)
@@ -705,10 +716,172 @@ function SessionPageContent({
     controls.setDraft(nextDraft);
   }, []);
 
+  // Codex 技能列表：会话挂载后按项目拉取，供 slash 面板直接选择
+  useEffect(() => {
+    if (effectiveProvider !== "codex") {
+      setCodexSkills([]);
+      setCodexSkillsLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    setCodexSkillsLoading(true);
+    void api
+      .getCodexSkills(projectId)
+      .then((result) => {
+        if (cancelled) return;
+        setCodexSkills(
+          result.skills.map((skill) => ({
+            name: skill.name,
+            scope: skill.scope,
+          })),
+        );
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setCodexSkills([]);
+      })
+      .finally(() => {
+        if (!cancelled) setCodexSkillsLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [effectiveProvider, projectId]);
+
+  const reasoningSubtitle = useMemo(() => {
+    if (thinkingMode === "off") return t("newSessionThinkingOff");
+    if (thinkingMode === "auto") return t("codexReasoningAuto");
+    if (effortLevel === "low") return t("codexReasoningLow");
+    if (effortLevel === "medium") return t("codexReasoningMedium");
+    if (effortLevel === "high") return t("codexReasoningHigh");
+    return t("codexReasoningMax");
+  }, [effortLevel, t, thinkingMode]);
+
+  const codexSlashBuiltins = useMemo<CodexSlashBuiltinItem[]>(() => {
+    if (effectiveProvider !== "codex") return [];
+    return [
+      {
+        id: "reasoning",
+        title: t("codexSlashBuiltinReasoning"),
+        subtitle: reasoningSubtitle,
+      },
+      {
+        id: "model",
+        title: t("codexSlashBuiltinModel"),
+        subtitle: effectiveModel || t("newSessionModelTitle"),
+      },
+      {
+        id: "status",
+        title: t("codexSlashBuiltinStatus"),
+        subtitle: t("codexSlashBuiltinStatusSubtitle"),
+      },
+      {
+        id: "goal",
+        title: t("codexSlashBuiltinGoal"),
+        subtitle: t("codexSlashBuiltinGoalSubtitle"),
+      },
+      {
+        id: "plan",
+        title: t("codexSlashBuiltinPlan"),
+        subtitle: codexPlanMode
+          ? t("codexSlashPlanEnabled")
+          : t("codexSlashPlanDisabled"),
+      },
+      {
+        id: "memory",
+        title: t("codexSlashBuiltinMemory"),
+        subtitle: t("codexSlashBuiltinMemoryUnavailable"),
+        disabled: true,
+      },
+      {
+        id: "compact",
+        title: t("codexSlashBuiltinCompact"),
+        subtitle: t("codexSlashBuiltinCompactSubtitle"),
+      },
+    ];
+  }, [
+    codexPlanMode,
+    effectiveModel,
+    effectiveProvider,
+    reasoningSubtitle,
+    t,
+  ]);
+
+  const handleCodexSlashBuiltin = useCallback(
+    (id: CodexSlashBuiltinId) => {
+      switch (id) {
+        case "model":
+          setShowModelModal(true);
+          return;
+        case "reasoning":
+          setShowReasoningModal(true);
+          return;
+        case "status":
+          setShowProcessInfoModal(true);
+          return;
+        case "plan":
+          setCodexPlanMode((value) => {
+            const nextValue = !value;
+            showToast(
+              nextValue
+                ? t("codexSlashPlanEnabled")
+                : t("codexSlashPlanDisabled"),
+              "success",
+            );
+            return nextValue;
+          });
+          return;
+        case "compact":
+          void api
+            .compactSession(projectId, sessionId)
+            .then((result) => {
+              if (status.owner !== "self") {
+                setStatus({ owner: "self", processId: result.processId });
+                reconnectStream();
+              }
+              setProcessState("idle");
+              void refreshSession();
+              showToast(t("codexSlashCompactStarted"), "success");
+            })
+            .catch((err) => {
+              const message = err instanceof Error ? err.message : String(err);
+              showToast(t("codexSlashCompactFailed", { message }), "error");
+            });
+          return;
+        case "goal":
+          showToast(t("codexSlashGoalPlaceholder"), "success");
+          return;
+        case "memory":
+          // 记忆能力第一版灰显，不执行动作
+          return;
+      }
+    },
+    [
+      projectId,
+      reconnectStream,
+      refreshSession,
+      sessionId,
+      setProcessState,
+      setStatus,
+      showToast,
+      status.owner,
+      t,
+    ],
+  );
+
+  const handleCodexSlashSkill = useCallback(
+    (name: string) => {
+      appendToDraft(`$${name}`);
+    },
+    [appendToDraft],
+  );
+
   const handleCustomCommand = useCallback(
     (command: string) => {
       if (command === "model") {
-        showToast(t("modelSwitchTitle"), "success");
+        setShowModelModal(true);
         return true;
       }
       if (command === "compact" && effectiveProvider === "codex") {
@@ -1343,6 +1516,27 @@ function SessionPageContent({
           />
         )}
 
+        {showModelModal && session?.provider === "codex" && (
+          <ModelSwitchModal
+            processId={
+              status.owner === "self" ? status.processId : undefined
+            }
+            currentModel={effectiveModel}
+            fallbackModels={currentProviderInfo?.models}
+            onModelChanged={handleModelChanged}
+            onClose={() => setShowModelModal(false)}
+          />
+        )}
+
+        {showReasoningModal && session?.provider === "codex" && (
+          <ReasoningSettingsModal
+            thinkingMode={thinkingMode}
+            effortLevel={effortLevel}
+            onSelect={handleReasoningSelect}
+            onClose={() => setShowReasoningModal(false)}
+          />
+        )}
+
         {status.owner === "external" && (
           <div className="external-session-warning">
             {t("sessionExternalWarning")}
@@ -1554,6 +1748,17 @@ function SessionPageContent({
                 uploadProgress={uploadProgress}
                 slashCommands={status.owner !== "external" ? allSlashCommands : []}
                 onCustomCommand={handleCustomCommand}
+                codexSlashPanel={
+                  effectiveProvider === "codex" && status.owner !== "external"
+                    ? {
+                        builtins: codexSlashBuiltins,
+                        skills: codexSkills,
+                        loadingSkills: codexSkillsLoading,
+                        onSelectBuiltin: handleCodexSlashBuiltin,
+                        onSelectSkill: handleCodexSlashSkill,
+                      }
+                    : undefined
+                }
               />
             )}
           </div>
@@ -1562,3 +1767,4 @@ function SessionPageContent({
     </div>
   );
 }
+
