@@ -2439,19 +2439,48 @@ a.sidebar-nav-item {
 /* Deferred messages - queued server-side */
 .deferred-message {
   margin-bottom: var(--space-3);
+  padding: 0.55rem 0.65rem;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.deferred-message--steering {
+  border-color: rgba(59, 130, 246, 0.35);
+}
+
+.deferred-message--sent {
+  border-color: rgba(16, 185, 129, 0.28);
+  opacity: 0.92;
 }
 
 .deferred-message-bubble {
-  opacity: 0.7;
+  opacity: 0.92;
   border-left: 3px solid var(--attention-color);
   padding-left: var(--space-2);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.deferred-message-editor {
+  width: 100%;
+  min-height: 72px;
+  resize: vertical;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.2);
+  color: var(--text-primary);
+  padding: 0.55rem 0.7rem;
+  font: inherit;
 }
 
 .deferred-message-footer {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: var(--space-2);
-  margin-top: var(--space-1);
+  margin-top: var(--space-2);
+  flex-wrap: wrap;
 }
 
 .deferred-message-status {
@@ -2460,19 +2489,69 @@ a.sidebar-nav-item {
   font-style: italic;
 }
 
+.deferred-message-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+}
+
+.deferred-message-action {
+  min-height: 32px;
+  padding: 0 0.7rem;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-primary);
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.deferred-message-action.primary {
+  border-color: rgba(16, 185, 129, 0.35);
+  background: rgba(16, 185, 129, 0.12);
+  color: var(--app-yep-green);
+}
+
+.deferred-message-action:disabled,
+.deferred-message-cancel:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .deferred-message-cancel {
+  min-width: 32px;
+  min-height: 32px;
   background: none;
-  border: none;
+  border: 1px solid rgba(255, 255, 255, 0.08);
   color: var(--text-dimmed);
   cursor: pointer;
-  font-size: 14px;
+  font-size: 16px;
   line-height: 1;
-  padding: 0 var(--space-1);
-  border-radius: var(--radius-sm);
+  padding: 0 0.45rem;
+  border-radius: 999px;
 }
 
 .deferred-message-cancel:hover {
   color: var(--error-color);
+}
+
+.deferred-message-error {
+  margin-top: 0.35rem;
+  color: var(--error-color);
+  font-size: var(--font-size-xs);
+}
+
+@media (max-width: 600px) {
+  .deferred-message {
+    padding: 0.5rem 0.55rem;
+  }
+
+  .deferred-message-action,
+  .deferred-message-cancel {
+    min-height: 36px;
+  }
 }
 
 /* ==========================================================================

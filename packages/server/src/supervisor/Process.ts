@@ -190,8 +190,20 @@ export class Process {
   /** Context window size reported by SDK in result messages' modelUsage */
   private _contextWindow: number | undefined;
 
-  /** Deferred message queue — messages queued while agent is in-turn, auto-sent when turn ends */
+/** Deferred message queue — messages queued while agent is in-turn, auto-sent when turn ends */
   private deferredQueue: { message: UserMessage; timestamp: string }[] = [];
+
+  /** 跟进消息短生命周期状态：steering / sent */
+  private followUpStateByTempId = new Map<
+    string,
+    {
+      status: "steering" | "sent";
+      content: string;
+      timestamp: string;
+      behavior: "steer";
+      expiresAt: number;
+    }
+  >();
 
   /** Whether the process is held (soft pause) */
   private _isHeld = false;
@@ -960,7 +972,7 @@ export class Process {
       });
     }
 
-    if (this.messageQueue) {
+if (this.messageQueue) {
       // If provider supports in-turn steering, prefer that over queue-after-turn behavior.
       if (this._state.type === "in-turn" && this.steerFn) {
         const steerMessage: UserMessage = {
@@ -969,10 +981,38 @@ export class Process {
           text: content,
           attachments: undefined,
         };
+        // 直接引导也写入短生命周期状态，便于前端展示
+        if (message.tempId) {
+          const now = Date.now();
+          this.followUpStateByTempId.set(message.tempId, {
+            status: "steering",
+            content: message.text,
+            timestamp: new Date().toISOString(),
+            behavior: "steer",
+            expiresAt: now + 30_000,
+          });
+          this.emitDeferredQueueChange();
+        }
         void this.steerFn(steerMessage)
           .then((steered) => {
             if (!steered) {
+              if (message.tempId) {
+                this.followUpStateByTempId.delete(message.tempId);
+                this.emitDeferredQueueChange();
+              }
               this.messageQueue?.push(messageWithUuid);
+              return;
+            }
+            if (message.tempId) {
+              const now = Date.now();
+              this.followUpStateByTempId.set(message.tempId, {
+                status: "sent",
+                content: message.text,
+                timestamp: new Date().toISOString(),
+                behavior: "steer",
+                expiresAt: now + 120_000,
+              });
+              this.emitDeferredQueueChange();
             }
           })
           .catch((error) => {
@@ -987,6 +1027,10 @@ export class Process {
               },
               "Steer failed; falling back to queued message",
             );
+            if (message.tempId) {
+              this.followUpStateByTempId.delete(message.tempId);
+              this.emitDeferredQueueChange();
+            }
             this.messageQueue?.push(messageWithUuid);
           });
         return { success: true, position: 0 };
@@ -1010,11 +1054,15 @@ export class Process {
     return { success: true, position: this.legacyQueue.length };
   }
 
-  /**
+/**
    * Add a message to the deferred queue.
    * Deferred messages are held server-side and auto-sent when the agent's current turn ends.
    */
   deferMessage(message: UserMessage): { success: true } {
+    // 重新入队时清掉同 tempId 的短生命周期状态
+    if (message.tempId) {
+      this.followUpStateByTempId.delete(message.tempId);
+    }
     this.deferredQueue.push({
       message,
       timestamp: new Date().toISOString(),
@@ -1024,16 +1072,132 @@ export class Process {
   }
 
   /**
-   * Cancel a deferred message by its tempId.
+   * 更新排队中消息文案。仅 queued 可改。
    */
-  cancelDeferredMessage(tempId: string): boolean {
+  updateDeferredMessage(
+    tempId: string,
+    content: string,
+  ):
+    | { success: true; summary: ReturnType<Process["getDeferredQueueSummary"]>[number] }
+    | { success: false; error: string; code: 400 | 404 } {
+    const trimmed = content.trim();
+    if (!trimmed) {
+      return { success: false, error: "Content is required", code: 400 };
+    }
+
+    const entry = this.deferredQueue.find((item) => item.message.tempId === tempId);
+    if (!entry) {
+      return { success: false, error: "Deferred message not found", code: 404 };
+    }
+
+    entry.message = {
+      ...entry.message,
+      text: trimmed,
+    };
+    this.emitDeferredQueueChange();
+    return {
+      success: true,
+      summary: {
+        tempId,
+        content: trimmed,
+        timestamp: entry.timestamp,
+        status: "queued",
+        behavior: "queue",
+      },
+    };
+  }
+
+  /**
+   * 将排队消息提升为立即引导。
+   */
+  promoteDeferredMessageToSteer(tempId: string):
+    | { success: true }
+    | { success: false; error: string; code: 404 | 410 } {
     const index = this.deferredQueue.findIndex(
       (entry) => entry.message.tempId === tempId,
     );
-    if (index === -1) return false;
-    this.deferredQueue.splice(index, 1);
+    if (index === -1) {
+      return { success: false, error: "Deferred message not found", code: 404 };
+    }
+
+    const [entry] = this.deferredQueue.splice(index, 1);
+    if (!entry) {
+      return { success: false, error: "Deferred message not found", code: 404 };
+    }
+
+    const now = Date.now();
+    this.followUpStateByTempId.set(tempId, {
+      status: "steering",
+      content: entry.message.text,
+      timestamp: entry.timestamp,
+      behavior: "steer",
+      expiresAt: now + 30_000,
+    });
     this.emitDeferredQueueChange();
-    return true;
+
+const result = this.queueMessage(entry.message);
+    if (!result.success) {
+      // 引导失败：回到排队，避免消息丢失
+      this.followUpStateByTempId.delete(tempId);
+      this.deferredQueue.splice(index, 0, entry);
+      this.emitDeferredQueueChange();
+      return {
+        success: false,
+        error: result.error ?? "Failed to steer message",
+        code: 410,
+      };
+    }
+
+    // 最终 sent/steering 状态由 queueMessage 的 steer 路径维护；
+    // 这里只保证至少有一条 steering 摘要可展示。
+    if (!this.followUpStateByTempId.has(tempId)) {
+      this.followUpStateByTempId.set(tempId, {
+        status: "sent",
+        content: entry.message.text,
+        timestamp: entry.timestamp,
+        behavior: "steer",
+        expiresAt: now + 120_000,
+      });
+      this.emitDeferredQueueChange();
+    }
+    return { success: true };
+  }
+
+  /**
+   * Cancel a deferred message by its tempId.
+   * queued 可删；steering 仅在未确认前可删；sent 不可删。
+   */
+  cancelDeferredMessage(
+    tempId: string,
+  ):
+    | { success: true }
+    | { success: false; error: string; code: 404 | 409 } {
+    const index = this.deferredQueue.findIndex(
+      (entry) => entry.message.tempId === tempId,
+    );
+    if (index !== -1) {
+      this.deferredQueue.splice(index, 1);
+      this.followUpStateByTempId.delete(tempId);
+      this.emitDeferredQueueChange();
+      return { success: true };
+    }
+
+    const state = this.followUpStateByTempId.get(tempId);
+    if (!state) {
+      return { success: false, error: "Deferred message not found", code: 404 };
+    }
+    if (state.status === "sent") {
+      return {
+        success: false,
+        error: "Message already sent",
+        code: 409,
+      };
+    }
+
+    // steering 在本实现里提交后立刻进入 sent；这里保留接口语义
+    this.followUpStateByTempId.delete(tempId);
+    this.emitDeferredQueueChange();
+    return { success: true };
   }
 
   /**
@@ -1043,12 +1207,27 @@ export class Process {
     tempId?: string;
     content: string;
     timestamp: string;
+    status?: "queued" | "steering" | "sent";
+    behavior?: "queue" | "steer";
   }[] {
-    return this.deferredQueue.map((entry) => ({
+    this.pruneFollowUpState();
+    const queued = this.deferredQueue.map((entry) => ({
       tempId: entry.message.tempId,
       content: entry.message.text,
       timestamp: entry.timestamp,
+      status: "queued" as const,
+      behavior: "queue" as const,
     }));
+    const followUps = Array.from(this.followUpStateByTempId.entries()).map(
+      ([tempId, state]) => ({
+        tempId,
+        content: state.content,
+        timestamp: state.timestamp,
+        status: state.status,
+        behavior: state.behavior,
+      }),
+    );
+    return [...queued, ...followUps];
   }
 
   /**
@@ -1059,6 +1238,16 @@ export class Process {
       type: "deferred-queue",
       messages: this.getDeferredQueueSummary(),
     });
+  }
+
+  /** 清理过期的 steering/sent 状态 */
+  private pruneFollowUpState(): void {
+    const now = Date.now();
+    for (const [tempId, state] of this.followUpStateByTempId) {
+      if (state.expiresAt <= now) {
+        this.followUpStateByTempId.delete(tempId);
+      }
+    }
   }
 
   /**

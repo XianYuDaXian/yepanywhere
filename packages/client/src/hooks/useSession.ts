@@ -58,6 +58,8 @@ export interface DeferredMessage {
   tempId?: string;
   content: string;
   timestamp: string;
+  status?: "queued" | "steering" | "sent";
+  behavior?: "queue" | "steer";
 }
 
 function extractUserMessageText(

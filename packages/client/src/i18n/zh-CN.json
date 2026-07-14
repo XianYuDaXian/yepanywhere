@@ -971,7 +971,20 @@
   "codexSlashEmptyBuiltins": "无匹配内建项",
   "codexSlashEmptySkills": "无匹配技能",
   "codexSlashSkillsLoading": "技能加载中…",
-  "codexSlashBuiltinStatusHint": "任务、上下文与限额",
+"codexSlashBuiltinStatusHint": "任务、上下文与限额",
   "codexSlashBuiltinGoalHint": "当前版本暂以提示方式提供",
-  "codexSlashBuiltinCompactHint": "压缩当前上下文"
+  "codexSlashBuiltinCompactHint": "压缩当前上下文",
+  "deferredStatusQueuedNext": "排队（下一条）",
+  "deferredStatusQueuedIndex": "排队（#{index}）",
+  "deferredStatusSteering": "引导中",
+  "deferredStatusSent": "已引导",
+  "deferredActionEdit": "编辑",
+  "deferredActionSave": "保存",
+  "deferredActionCancel": "取消",
+  "deferredActionReuse": "再发一条修正",
+  "deferredEditLabel": "编辑排队消息",
+  "deferredEditEmpty": "内容不能为空",
+  "deferredUpdateFailed": "更新排队消息失败：{message}",
+  "deferredSteerFailed": "改为引导失败：{message}",
+  "deferredCancelFailed": "取消失败：{message}"
 }

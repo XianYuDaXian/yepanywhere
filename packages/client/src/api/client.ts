@@ -566,6 +566,27 @@ export const api = {
       }),
     }),
 
+updateDeferredMessage: (sessionId: string, tempId: string, content: string) =>
+    fetchJSON<{
+      updated: boolean;
+      message: {
+        tempId?: string;
+        content: string;
+        timestamp: string;
+        status?: "queued" | "steering" | "sent";
+        behavior?: "queue" | "steer";
+      };
+    }>(`/sessions/${sessionId}/deferred/${encodeURIComponent(tempId)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ content }),
+    }),
+
+  steerDeferredMessage: (sessionId: string, tempId: string) =>
+    fetchJSON<{ steered: boolean }>(
+      `/sessions/${sessionId}/deferred/${encodeURIComponent(tempId)}/steer`,
+      { method: "POST" },
+    ),
+
   cancelDeferredMessage: (sessionId: string, tempId: string) =>
     fetchJSON<{ cancelled: boolean }>(
       `/sessions/${sessionId}/deferred/${encodeURIComponent(tempId)}`,

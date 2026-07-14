@@ -6,6 +6,10 @@ import {
 } from "../lib/preprocessMessages";
 import type { Message } from "../types";
 import type { RenderItem } from "../types/renderItems";
+import {
+  DeferredFollowUpCard,
+  type DeferredFollowUpMessage,
+} from "./DeferredFollowUpCard";
 import { ProcessingIndicator } from "./ProcessingIndicator";
 import { RenderItemComponent } from "./RenderItemComponent";
 
@@ -50,13 +54,6 @@ interface PendingMessage {
   status?: string;
 }
 
-/** Deferred message queued server-side */
-interface DeferredMessage {
-  tempId?: string;
-  content: string;
-  timestamp: string;
-}
-
 interface Props {
   messages: Message[];
   provider?: string;
@@ -69,9 +66,15 @@ interface Props {
   /** Messages waiting for server confirmation (shown as "Sending...") */
   pendingMessages?: PendingMessage[];
   /** Deferred messages queued server-side (shown as "Queued") */
-  deferredMessages?: DeferredMessage[];
+  deferredMessages?: DeferredFollowUpMessage[];
+  /** 更新排队消息文案 */
+  onUpdateDeferred?: (tempId: string, content: string) => Promise<void>;
+  /** 排队消息改为立即引导 */
+  onSteerDeferred?: (tempId: string) => Promise<void>;
   /** Callback to cancel a deferred message */
-  onCancelDeferred?: (tempId: string) => void;
+  onCancelDeferred?: (tempId: string) => Promise<void> | void;
+  /** 已发送引导消息再填回输入框 */
+  onReuseDeferred?: (content: string) => void;
   /** Pre-rendered markdown HTML from server (keyed by message ID) */
   markdownAugments?: Record<string, MarkdownAugment>;
   /** Active tool approval - prevents matching orphaned tool from showing as interrupted */
@@ -91,9 +94,12 @@ export const MessageList = memo(function MessageList({
   isProcessing = false,
   isCompacting = false,
   scrollTrigger = 0,
-  pendingMessages = [],
+pendingMessages = [],
   deferredMessages = [],
+  onUpdateDeferred,
+  onSteerDeferred,
   onCancelDeferred,
+  onReuseDeferred,
   markdownAugments,
   activeToolApproval,
   hasOlderMessages = false,
@@ -329,32 +335,33 @@ export const MessageList = memo(function MessageList({
           </div>
         </div>
       ))}
-      {/* Deferred messages - queued server-side, waiting for agent turn to end */}
-      {deferredMessages.map((deferred, index) => (
-        <div
-          key={deferred.tempId ?? `deferred-${index}`}
-          className="deferred-message"
-        >
-          <div className="message-user-prompt deferred-message-bubble">
-            {deferred.content}
-          </div>
-          <div className="deferred-message-footer">
-            <span className="deferred-message-status">
-              {index === 0 ? "Queued (next)" : `Queued (#${index + 1})`}
-            </span>
-            {deferred.tempId && onCancelDeferred && (
-              <button
-                type="button"
-                className="deferred-message-cancel"
-                onClick={() => onCancelDeferred(deferred.tempId as string)}
-                aria-label="Cancel queued message"
-              >
-                ×
-              </button>
-            )}
-          </div>
-        </div>
-      ))}
+{/* Deferred messages - queued server-side, waiting for agent turn to end */}
+      {deferredMessages.map((deferred, index) => {
+        const status = deferred.status ?? "queued";
+        const queueIndex =
+          status === "queued"
+            ? deferredMessages
+                .slice(0, index)
+                .filter((item) => (item.status ?? "queued") === "queued").length
+            : 0;
+        return (
+          <DeferredFollowUpCard
+            key={deferred.tempId ?? `deferred-${index}`}
+            message={deferred}
+            queueIndex={queueIndex}
+            onUpdateContent={onUpdateDeferred}
+            onSteer={onSteerDeferred}
+            onCancel={
+              onCancelDeferred
+                ? async (tempId) => {
+                    await onCancelDeferred(tempId);
+                  }
+                : undefined
+            }
+            onReuse={onReuseDeferred}
+          />
+        );
+      })}
       {/* Compacting indicator - shown when context is being compressed */}
       {isCompacting && (
         <div className="system-message system-message-compacting">

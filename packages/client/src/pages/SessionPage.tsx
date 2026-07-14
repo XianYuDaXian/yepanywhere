@@ -705,7 +705,7 @@ function SessionPageContent({
     [effortLevel, setEffortLevel, setThinkingMode],
   );
 
-  const appendToDraft = useCallback((value: string) => {
+const appendToDraft = useCallback((value: string) => {
     const controls = draftControlsRef.current;
     if (!controls) return;
 
@@ -714,6 +714,53 @@ function SessionPageContent({
       ? `${currentDraft.trimEnd()} ${value}`
       : value;
     controls.setDraft(nextDraft);
+  }, []);
+
+  // 跟进消息：编辑排队文案
+  const handleUpdateDeferred = useCallback(
+    async (tempId: string, content: string) => {
+      try {
+        await api.updateDeferredMessage(sessionId, tempId, content);
+      } catch (err) {
+        const errorMsg = err instanceof Error ? err.message : String(err);
+        showToast(t("deferredUpdateFailed", { message: errorMsg }), "error");
+        throw err;
+      }
+    },
+    [sessionId, showToast, t],
+  );
+
+  // 跟进消息：排队提升为立即引导
+  const handleSteerDeferred = useCallback(
+    async (tempId: string) => {
+      try {
+        await api.steerDeferredMessage(sessionId, tempId);
+      } catch (err) {
+        const errorMsg = err instanceof Error ? err.message : String(err);
+        showToast(t("deferredSteerFailed", { message: errorMsg }), "error");
+        throw err;
+      }
+    },
+    [sessionId, showToast, t],
+  );
+
+  // 跟进消息：取消排队/引导中
+  const handleCancelDeferred = useCallback(
+    async (tempId: string) => {
+      try {
+        await api.cancelDeferredMessage(sessionId, tempId);
+      } catch (err) {
+        const errorMsg = err instanceof Error ? err.message : String(err);
+        showToast(t("deferredCancelFailed", { message: errorMsg }), "error");
+        throw err;
+      }
+    },
+    [sessionId, showToast, t],
+  );
+
+  // 已发送引导：把内容填回输入框，便于再发修正
+  const handleReuseDeferred = useCallback((content: string) => {
+    draftControlsRef.current?.setDraft(content);
   }, []);
 
   // Codex 技能列表：会话挂载后按项目拉取，供 slash 面板直接选择
@@ -1574,10 +1621,11 @@ function SessionPageContent({
                   isCompacting={isCompacting}
                   scrollTrigger={scrollTrigger}
                   pendingMessages={pendingMessages}
-                  deferredMessages={deferredMessages}
-                  onCancelDeferred={(tempId) =>
-                    api.cancelDeferredMessage(sessionId, tempId)
-                  }
+deferredMessages={deferredMessages}
+                  onUpdateDeferred={handleUpdateDeferred}
+                  onSteerDeferred={handleSteerDeferred}
+                  onCancelDeferred={handleCancelDeferred}
+                  onReuseDeferred={handleReuseDeferred}
                   markdownAugments={markdownAugments}
                   activeToolApproval={activeToolApproval}
                   hasOlderMessages={pagination?.hasOlderMessages}

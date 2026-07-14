@@ -219,9 +219,15 @@ export type ProcessEvent =
   | { type: "error"; error: Error }
   | { type: "complete" }
   | { type: "terminated"; reason: string; error?: Error }
-  | {
+| {
       type: "deferred-queue";
-      messages: { tempId?: string; content: string; timestamp: string }[];
+      messages: {
+        tempId?: string;
+        content: string;
+        timestamp: string;
+        status?: "queued" | "steering" | "sent";
+        behavior?: "queue" | "steer";
+      }[];
     };
 
 // Process options

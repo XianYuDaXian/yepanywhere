@@ -1605,6 +1605,53 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
     });
   });
 
+// PATCH /api/sessions/:sessionId/deferred/:tempId - 编辑排队消息文案
+  routes.patch("/sessions/:sessionId/deferred/:tempId", async (c) => {
+    const sessionId = c.req.param("sessionId");
+    const tempId = c.req.param("tempId");
+
+    const process = deps.supervisor.getProcessForSession(sessionId);
+    if (!process) {
+      return c.json({ error: "No active process for session" }, 404);
+    }
+
+    let body: { content?: string };
+    try {
+      body = await c.req.json<{ content?: string }>();
+    } catch {
+      return c.json({ error: "Invalid JSON body" }, 400);
+    }
+
+    if (typeof body.content !== "string") {
+      return c.json({ error: "content is required" }, 400);
+    }
+
+    const result = process.updateDeferredMessage(tempId, body.content);
+    if (!result.success) {
+      return c.json({ error: result.error }, result.code);
+    }
+
+    return c.json({ updated: true, message: result.summary });
+  });
+
+  // POST /api/sessions/:sessionId/deferred/:tempId/steer - 排队提升为立即引导
+  routes.post("/sessions/:sessionId/deferred/:tempId/steer", (c) => {
+    const sessionId = c.req.param("sessionId");
+    const tempId = c.req.param("tempId");
+
+    const process = deps.supervisor.getProcessForSession(sessionId);
+    if (!process) {
+      return c.json({ error: "No active process for session" }, 404);
+    }
+
+    const result = process.promoteDeferredMessageToSteer(tempId);
+    if (!result.success) {
+      return c.json({ error: result.error }, result.code);
+    }
+
+    return c.json({ steered: true });
+  });
+
   // DELETE /api/sessions/:sessionId/deferred/:tempId - Cancel a deferred message
   routes.delete("/sessions/:sessionId/deferred/:tempId", (c) => {
     const sessionId = c.req.param("sessionId");
@@ -1615,9 +1662,9 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
       return c.json({ error: "No active process for session" }, 404);
     }
 
-    const cancelled = process.cancelDeferredMessage(tempId);
-    if (!cancelled) {
-      return c.json({ error: "Deferred message not found" }, 404);
+    const result = process.cancelDeferredMessage(tempId);
+    if (!result.success) {
+      return c.json({ error: result.error }, result.code);
     }
 
     return c.json({ cancelled: true });

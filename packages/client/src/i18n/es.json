@@ -971,7 +971,20 @@
   "codexSlashEmptyBuiltins": "No matching built-ins",
   "codexSlashEmptySkills": "No matching skills",
   "codexSlashSkillsLoading": "Loading skills…",
-  "codexSlashBuiltinStatusHint": "Task, context, and limits",
+"codexSlashBuiltinStatusHint": "Task, context, and limits",
   "codexSlashBuiltinGoalHint": "Shown as a hint in this version",
-  "codexSlashBuiltinCompactHint": "Compact current context"
+  "codexSlashBuiltinCompactHint": "Compact current context",
+  "deferredStatusQueuedNext": "Queued (next)",
+  "deferredStatusQueuedIndex": "Queued (#{index})",
+  "deferredStatusSteering": "Steering",
+  "deferredStatusSent": "Steered",
+  "deferredActionEdit": "Edit",
+  "deferredActionSave": "Save",
+  "deferredActionCancel": "Cancel",
+  "deferredActionReuse": "Reuse as correction",
+  "deferredEditLabel": "Edit queued message",
+  "deferredEditEmpty": "Content cannot be empty",
+  "deferredUpdateFailed": "Failed to update queued message: {message}",
+  "deferredSteerFailed": "Failed to steer message: {message}",
+  "deferredCancelFailed": "Failed to cancel: {message}"
 }
