@@ -1,4 +1,4 @@
-# Codex 原生 Slash 面板与上下文占用显示设计
+# Codex 原生 Slash 面板、上下文占用与引导插队设计
 
 Date: 2026-07-14
 
@@ -6,16 +6,18 @@ Date: 2026-07-14
 
 当前部署继续使用本地修改版 `04cc45b`，不同步上游。
 
-用户只用 Codex。当前 Web 端有两处体验差距：
+用户只用 Codex。当前 Web 端有三处体验差距：
 
 1. slash 菜单只是文字命令列表，不像 Codex 原生命令面板。
 2. 上下文主显示更像“本轮 input”，不是“当前上下文占用”。
+3. 运行中消息发送语义不够清楚，缺少明确的引导 / 插队 / 排队入口。
 
 目标：
 
 1. 做完整 Codex 风格 slash 面板。
 2. 动作尽量转给 Codex 进程执行。
 3. 主显示上下文占用；详情再拆本轮 input / cache / total。
+4. 明确实现引导、插队、排队三类运行中发送语义。
 
 ## 决策
 
@@ -32,6 +34,9 @@ Date: 2026-07-14
    - 计划模式 / collaboration
    - compact
    - rate limits / token usage
+   - `turn/steer` 引导
+   - interrupt 中断
+   - deferred queue 排队
 4. 面板必须由 YA 绘制。
 5. 动作应尽量走进程/协议，而不是插入 `/xxx` 文本。
 
@@ -56,6 +61,10 @@ Date: 2026-07-14
    - cache
    - total
 7. Claude 会话行为不受影响。
+8. 运行中发送语义明确：
+   - 引导：不打断，走 `turn/steer`
+   - 插队：先 `interrupt`，再立刻发新消息
+   - 排队：等当前回合结束后再发
 
 ## 架构
 
@@ -66,6 +75,7 @@ Date: 2026-07-14
 
 2. `MessageInput` / `MessageInputToolbar`
 - 负责检测 `/` 输入、打开关闭面板、把选中项交给动作层。
+- 负责运行中引导 / 插队 / 排队入口。
 
 3. `SessionPage` / 会话控制层
 - 负责把面板动作映射到 API：
@@ -75,6 +85,7 @@ Date: 2026-07-14
   - 打开会话信息
   - 触发 compact
   - 插入 skill
+  - 引导 / 插队 / 排队
 
 4. `CodexProvider` / sessions 路由
 - 负责进程侧动作与上下文占用数据口径。
@@ -106,6 +117,13 @@ Codex token/usage 事件或 session summary
       totalTokens
   -> 主显示用 occupancy*
   -> 详情弹层用全部字段
+```
+
+```text
+运行中用户输入
+  -> 引导：Process.queueMessage / steerFn -> turn/steer
+  -> 插队：Process.interrupt -> 等待可发送 -> 立即发送
+  -> 排队：deferred queue -> 回合结束后发送
 ```
 
 ## Slash 完整面板
@@ -189,6 +207,7 @@ Codex token/usage 事件或 session summary
 4. compact API
 5. skills API
 6. 会话信息弹层
+7. steer / interrupt / deferred queue 进程能力
 
 ## 上下文显示
 
@@ -275,6 +294,107 @@ interface ContextUsageViewModel {
 
 两处输出同一套字段语义，避免刷新前后百分比跳变。
 
+## 引导 / 插队 / 排队
+
+### 语义定义
+
+| 名称 | 含义 | 进程动作 |
+|---|---|---|
+| 引导 | 把补充说明塞进当前回合，不中断当前工作 | `turn/steer` |
+| 插队 | 停止当前回合，立刻开始处理新消息 | 先 `interrupt`，再立即发送 |
+| 排队 | 不打断当前回合，等回合结束后再发 | deferred queue |
+
+### 现状基础
+
+当前代码已有半成品：
+
+1. Codex provider 已有 `steerFn`，内部走 `turn/steer`
+2. `Process.queueMessage` 在 `in-turn` 时会先尝试 steer
+3. 前端已有 deferred queue：
+   - Ctrl+Enter
+   - 排队按钮
+4. 前端停止按钮会先 `interrupt`，失败再 abort
+
+缺口：
+
+1. UI 没有把“引导 / 插队 / 排队”拆成明确入口
+2. 运行中点发送时，用户看不出会走 steer 还是别的语义
+3. 插队不是一等能力，需要用户自己先停再发
+
+### 运行中发送规则
+
+仅在会话状态为 `in-turn` 时启用：
+
+1. **引导（默认）**
+- 主发送按钮文案或辅助说明体现“引导当前回合”
+- 点击后走 `steer`
+- 成功后消息以“已引导”状态展示
+- 若 `steer` 失败，降级为排队，并 toast 说明
+
+2. **插队**
+- 单独按钮或发送按钮二级动作
+- 流程：
+  1. `interrupt` 当前回合
+  2. 等待进程回到可接收状态
+  3. 立即发送新消息
+- 若 interrupt 失败，toast 报错，不静默改成排队
+
+3. **排队**
+- 保留现有 deferred queue
+- 入口继续可用：
+  - 排队按钮
+  - Ctrl+Enter
+- 消息列表显示“已排队”
+- 支持取消排队
+
+### 空闲状态
+
+会话不在 `in-turn` 时：
+
+1. 引导 / 插队入口隐藏或禁用
+2. 主发送恢复为普通发送
+3. 排队入口隐藏
+
+### 推荐 UI
+
+运行中输入区提供三类动作：
+
+1. 主按钮：引导
+2. 次按钮或长按/二级菜单：插队
+3. 独立按钮：排队
+
+文案：
+
+1. 引导：引导
+2. 插队：插队
+3. 排队：排队
+
+不使用含糊文案如“发送中”“继续说”。
+
+### 进程映射
+
+```text
+引导
+  -> Process.queueMessage / steerFn
+  -> Codex turn/steer
+
+插队
+  -> Process.interrupt
+  -> 等待可发送
+  -> 立即 queueMessage / start turn
+
+排队
+  -> deferred queue
+  -> 当前回合结束后自动发送
+```
+
+### 消息展示
+
+1. 引导成功：用户消息旁显示“已引导”
+2. 插队成功：用户消息旁显示“已插队”
+3. 排队中：显示“已排队”，可取消
+4. steer 失败降级排队：toast + 消息状态改为“已排队”
+
 ## 错误处理
 
 1. skills 拉取失败
@@ -297,6 +417,15 @@ interface ContextUsageViewModel {
 - 灰显
 - 不假装可切换
 
+6. 引导失败
+- 降级为排队
+- toast 说明“当前无法引导，已改为排队”
+
+7. 插队失败
+- 不自动改排队
+- toast 说明中断失败原因
+- 输入内容保留
+
 ## 测试
 
 ### 自动化
@@ -308,6 +437,11 @@ interface ContextUsageViewModel {
 5. 占用百分比使用 occupancy，不使用 turn input
 6. 压缩后 `input_tokens = 0` 时占用回退正确
 7. 详情字段包含 input / cache / total
+8. 运行中发送：
+   - 引导走 steer
+   - 插队先 interrupt 再发送
+   - 排队进入 deferred queue
+9. steer 失败时降级为排队
 
 ### 手测
 
@@ -321,6 +455,10 @@ interface ContextUsageViewModel {
 8. 主显示占用变化符合压缩前后预期
 9. 详情中本轮 input 与占用不是同一个数时，两者同时可见
 10. Claude 会话 slash 不变差
+11. 运行中点“引导”，当前回合不被中断
+12. 运行中点“插队”，当前回合停止后立即处理新消息
+13. 运行中点“排队”，消息进入队列并可取消
+14. 空闲时不显示引导 / 插队 / 排队入口
 
 ## 实现顺序
 
@@ -330,7 +468,8 @@ interface ContextUsageViewModel {
 4. 接入内建项动作
 5. 接入技能区
 6. 替换 Codex 会话默认 slash 入口
-7. 补测试与手测
+7. 明确引导 / 插队 / 排队入口与状态展示
+8. 补测试与手测
 
 ## 风险
 
@@ -345,6 +484,12 @@ interface ContextUsageViewModel {
 - 与某些原生“立即启用”行为可能不完全一致
 - 先保证可选、可见、可插入
 
+4. 插队依赖 interrupt 后的可发送时机
+- 需要明确等待条件，避免 interrupt 后消息丢失
+
+5. steer 在部分 CLI 版本上可能不稳定
+- 必须保留失败降级到排队
+
 ## 验收清单
 
 1. Codex 会话 slash 面板有内建项和技能区
@@ -353,3 +498,6 @@ interface ContextUsageViewModel {
 4. 详情可看本轮 input / cache / total
 5. 不同步上游
 6. 只影响 Codex 路径
+7. 运行中可明确执行引导 / 插队 / 排队
+8. 引导失败会降级排队并提示
+9. 插队失败不会静默改成排队
