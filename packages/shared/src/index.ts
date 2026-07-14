@@ -163,6 +163,13 @@ export {
   getModelContextWindow,
 } from "./app-types.js";
 
+// Codex 上下文占用统一模型
+export type {
+  ContextUsageViewModel,
+  CodexTokenUsageSnapshot,
+} from "./context-usage.js";
+export { buildCodexContextUsage } from "./context-usage.js";
+
 // Session utilities
 export {
   SessionView,

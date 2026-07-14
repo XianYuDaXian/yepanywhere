@@ -180,6 +180,16 @@ export interface ContextUsage {
   cacheReadTokens?: number;
   /** Cache creation tokens (new tokens added to cache) */
   cacheCreationTokens?: number;
+  /** 本轮原始输入 token（不含占用回退语义） */
+  turnInputTokens?: number;
+  /** 累计 total tokens（压缩后占用回退来源） */
+  totalTokens?: number;
+  /** 主显示：当前上下文占用 token */
+  occupancyTokens?: number;
+  /** 主显示：占用百分比 */
+  occupancyPercentage?: number;
+  /** 用量来源：实时流或持久化快照 */
+  source?: "live" | "persisted";
 }
 
 export interface CodexRateLimitWindow {
