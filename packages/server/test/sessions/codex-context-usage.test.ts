@@ -5,7 +5,7 @@ import {
 } from "@yep-anywhere/shared";
 
 describe("buildCodexContextUsage", () => {
-  it("uses occupancy tokens for percentage, not only turn input", () => {
+it("uses occupancy tokens for percentage, not only turn input", () => {
     const usage = buildCodexContextUsage({
       contextWindow: 285_000,
       turnInputTokens: 1_900,
@@ -24,6 +24,24 @@ describe("buildCodexContextUsage", () => {
     expect(usage.contextWindow).toBe(285_000);
   });
 
+  it("prefers total_tokens even when turn input is small", () => {
+    const usage = buildCodexContextUsage.fromTokenSnapshot(
+      {
+        inputTokens: 1_136,
+        cachedInputTokens: 52_864,
+        totalTokens: 54_113,
+        modelContextWindow: 285_000,
+      },
+      "persisted",
+    );
+
+    expect(usage.occupancyTokens).toBe(54_113);
+    expect(usage.percentage).toBe(19);
+    expect(usage.turnInputTokens).toBe(1_136);
+    expect(usage.cacheReadTokens).toBe(52_864);
+    expect(usage.totalTokens).toBe(54_113);
+  });
+
   it("falls back to total when turn input is 0 after compact", () => {
     const snapshot: CodexTokenUsageSnapshot = {
       inputTokens: 0,
@@ -31,7 +49,7 @@ describe("buildCodexContextUsage", () => {
       totalTokens: 8_500,
       modelContextWindow: 272_000,
     };
-const usage = buildCodexContextUsage.fromTokenSnapshot(snapshot, "persisted");
+    const usage = buildCodexContextUsage.fromTokenSnapshot(snapshot, "persisted");
     expect(usage.occupancyTokens).toBe(8_500);
     expect(usage.percentage).toBe(3);
     expect(usage.turnInputTokens).toBe(0);
@@ -49,5 +67,18 @@ const usage = buildCodexContextUsage.fromTokenSnapshot(snapshot, "persisted");
     expect(live.percentage).toBe(persisted.percentage);
     expect(live.occupancyTokens).toBe(9200);
     expect(persisted.occupancyTokens).toBe(9200);
+  });
+
+  it("falls back to input+cache when total is missing", () => {
+    const usage = buildCodexContextUsage.fromTokenSnapshot(
+      {
+        inputTokens: 1_000,
+        cachedInputTokens: 9_000,
+        modelContextWindow: 100_000,
+      },
+      "live",
+    );
+    expect(usage.occupancyTokens).toBe(10_000);
+    expect(usage.percentage).toBe(10);
   });
 });

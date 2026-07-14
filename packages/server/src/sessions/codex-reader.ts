@@ -549,9 +549,10 @@ export class CodexSessionReader implements ISessionReader {
       ) {
 const info = entry.payload.info;
         if (info?.last_token_usage || info?.total_token_usage) {
-          // 普通回合使用最新一轮的 input_tokens。
-          // 压缩完成后的记录会把 input_tokens 置为 0，
-          // 此时 total_tokens 才是新的背景占用。
+// Codex last_token_usage:
+          // - input_tokens 仅为本轮非缓存增量
+          // - total_tokens 才是当前上下文占用（含 cache）
+          // 压缩后 input_tokens 常为 0，total_tokens 仍有效。
           const usage = info.last_token_usage ?? info.total_token_usage;
           if (!usage) continue;
 
@@ -561,7 +562,7 @@ const info = entry.payload.info;
               ? info.model_context_window
               : getModelContextWindow(model, provider);
 
-          // 与 live 路径共用占用口径：turn input 为 0 时回退 total
+          // 主占用使用 last_token_usage.total_tokens（含 cache）
           const result = buildCodexContextUsage.fromTokenSnapshot(
             {
               inputTokens: usage.input_tokens,

@@ -479,7 +479,7 @@ const usage = msg.usage as {
         cache_creation_input_tokens?: number;
       };
 
-      // Codex 与 persisted 路径统一占用口径（压缩后 input=0 时回退 total）
+// Codex：主占用看 total_tokens（约等于 input+cache），turn input 仅作详情
       if (isCodexProvider) {
         const turnInputTokens = usage.input_tokens ?? 0;
         const cacheReadTokens =
@@ -488,17 +488,18 @@ const usage = msg.usage as {
           typeof (usage as { total_tokens?: number }).total_tokens === "number"
             ? (usage as { total_tokens?: number }).total_tokens!
             : turnInputTokens + cacheReadTokens;
-        const occupancyTokens =
-          turnInputTokens > 0 ? turnInputTokens : totalTokens;
-        if (occupancyTokens === 0) continue;
-        return buildCodexContextUsage({
-          contextWindow: contextWindowSize,
-          occupancyTokens,
-          turnInputTokens,
-          cacheReadTokens,
-          totalTokens,
-          source: "live",
-        });
+        const usageView = buildCodexContextUsage.fromTokenSnapshot(
+          {
+            inputTokens: turnInputTokens,
+            cachedInputTokens: cacheReadTokens,
+            totalTokens,
+            modelContextWindow: contextWindowSize,
+          },
+          "live",
+          contextWindowSize,
+        );
+        if (usageView.occupancyTokens === 0) continue;
+        return usageView;
       }
 
       // Claude/OpenCode/Gemini：input + cache_read + cache_creation
@@ -954,15 +955,25 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
     // Keep persisted rendering in lockstep with stream augmentation behavior.
     await augmentPersistedSessionMessages(session.messages);
 
-    // Override context usage with SDK-reported context window from live process
+// Override context usage with SDK-reported context window from live process
     // The reader uses hardcoded defaults; the process captures the real value at runtime
     let { contextUsage } = session;
     if (process?.contextWindow && contextUsage) {
       const cw = process.contextWindow;
+      const occupancyTokens =
+        contextUsage.occupancyTokens ?? contextUsage.inputTokens ?? 0;
+      const occupancyPercentage = Math.min(
+        100,
+        Math.round((occupancyTokens / Math.max(1, cw)) * 100),
+      );
       contextUsage = {
         ...contextUsage,
-        percentage: Math.round((contextUsage.inputTokens / cw) * 100),
         contextWindow: cw,
+        occupancyTokens,
+        occupancyPercentage,
+        // 兼容旧字段：主显示仍指向占用
+        inputTokens: occupancyTokens,
+        percentage: occupancyPercentage,
       };
       // Cache for future reads without a live process
       deps.modelInfoService?.recordContextWindow(
