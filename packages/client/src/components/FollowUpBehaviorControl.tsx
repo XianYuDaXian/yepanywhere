@@ -5,6 +5,8 @@ interface FollowUpBehaviorControlProps {
   value: FollowUpBehavior;
   onChange: (value: FollowUpBehavior) => void;
   disabled?: boolean;
+  /** 移动端紧凑模式：隐藏长说明，只保留切换 */
+  compact?: boolean;
 }
 
 /**
@@ -14,11 +16,12 @@ export function FollowUpBehaviorControl({
   value,
   onChange,
   disabled = false,
+  compact = false,
 }: FollowUpBehaviorControlProps) {
   const { t } = useI18n();
 
   return (
-    <div className="follow-up-behavior-control">
+    <div className={`follow-up-behavior-control ${compact ? "compact" : ""}`}>
       <div className="follow-up-behavior-header">
         <span className="follow-up-behavior-title">
           {t("followUpBehaviorTitle")}
@@ -50,9 +53,11 @@ export function FollowUpBehaviorControl({
           </button>
         </div>
       </div>
-      <p className="follow-up-behavior-description">
-        {t("followUpBehaviorDescription")}
-      </p>
+      {!compact && (
+        <p className="follow-up-behavior-description">
+          {t("followUpBehaviorDescription")}
+        </p>
+      )}
     </div>
   );
 }

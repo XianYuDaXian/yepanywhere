@@ -218,6 +218,16 @@ export function MessageInput({
   );
   const isCodex = provider === "codex";
   const showFollowUpControls = isCodex && !!isRunning;
+  // 移动端动作区空间有限，跟进行为时只用图标按钮，避免文字竖排挤乱
+  const [isCompactToolbar, setIsCompactToolbar] = useState(false);
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.matchMedia) return;
+    const media = window.matchMedia("(max-width: 768px)");
+    const sync = () => setIsCompactToolbar(media.matches);
+    sync();
+    media.addEventListener("change", sync);
+    return () => media.removeEventListener("change", sync);
+  }, []);
   const useCodexSlashPanel = isCodex && !!codexSlashPanel;
 
   // Combined display text: committed text + interim transcript
@@ -709,10 +719,17 @@ export function MessageInput({
             isThinking={isThinking}
             onStop={onStop}
             onSend={() => handleSubmit()}
-            onQueue={onQueue ? handleQueue : undefined}
-            onBargeIn={showFollowUpControls ? handleBargeIn : undefined}
+            onQueue={
+              // 跟进行为开启时，主按钮已承担排队/引导，不再额外放排队按钮
+              showFollowUpControls ? undefined : onQueue ? handleQueue : undefined
+            }
+            onBargeIn={
+              // 移动端隐藏插队文字按钮，避免右侧动作列溢出
+              showFollowUpControls && !isCompactToolbar ? handleBargeIn : undefined
+            }
             primaryActionLabel={
-              showFollowUpControls
+              // 桌面端显示排队/引导文案；移动端保持图标，避免竖排
+              showFollowUpControls && !isCompactToolbar
                 ? followUpBehavior === "steer"
                   ? t("followUpBehaviorSteer")
                   : t("followUpBehaviorQueue")
@@ -727,6 +744,7 @@ export function MessageInput({
             value={followUpBehavior}
             onChange={handleFollowUpBehaviorChange}
             disabled={disabled}
+            compact={isCompactToolbar}
           />
         )}
       </div>
