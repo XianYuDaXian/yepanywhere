@@ -31,9 +31,23 @@ describe("buildCodexContextUsage", () => {
       totalTokens: 8_500,
       modelContextWindow: 272_000,
     };
-    const usage = buildCodexContextUsage.fromTokenSnapshot(snapshot, "persisted");
+const usage = buildCodexContextUsage.fromTokenSnapshot(snapshot, "persisted");
     expect(usage.occupancyTokens).toBe(8_500);
     expect(usage.percentage).toBe(3);
     expect(usage.turnInputTokens).toBe(0);
+  });
+
+  it("keeps live and persisted occupancy semantics aligned after compact", () => {
+    const live = buildCodexContextUsage.fromTokenSnapshot(
+      { inputTokens: 0, totalTokens: 9200, modelContextWindow: 272000 },
+      "live",
+    );
+    const persisted = buildCodexContextUsage.fromTokenSnapshot(
+      { inputTokens: 0, totalTokens: 9200, modelContextWindow: 272000 },
+      "persisted",
+    );
+    expect(live.percentage).toBe(persisted.percentage);
+    expect(live.occupancyTokens).toBe(9200);
+    expect(persisted.occupancyTokens).toBe(9200);
   });
 });

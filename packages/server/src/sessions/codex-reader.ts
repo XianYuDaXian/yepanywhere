@@ -26,6 +26,7 @@ import {
   SESSION_TITLE_MAX_LENGTH,
   type UnifiedSession,
   type UrlProjectId,
+  buildCodexContextUsage,
   getModelContextWindow,
   parseCodexSessionEntry,
 } from "@yep-anywhere/shared";
@@ -546,30 +547,34 @@ export class CodexSessionReader implements ISessionReader {
         entry.type === "event_msg" &&
         entry.payload.type === "token_count"
       ) {
-        const info = entry.payload.info;
+const info = entry.payload.info;
         if (info?.last_token_usage || info?.total_token_usage) {
           // 普通回合使用最新一轮的 input_tokens。
           // 压缩完成后的记录会把 input_tokens 置为 0，
           // 此时 total_tokens 才是新的背景占用。
           const usage = info.last_token_usage ?? info.total_token_usage;
           if (!usage) continue;
-          const inputTokens =
-            usage.input_tokens > 0 ? usage.input_tokens : usage.total_tokens;
 
-          if (inputTokens === 0) continue;
-
-          // Prefer model_context_window from Codex if available, fall back to model-based lookup
+          // 优先使用 Codex 自带的 model_context_window，否则按模型回退
           const contextWindow =
             info.model_context_window && info.model_context_window > 0
               ? info.model_context_window
               : getModelContextWindow(model, provider);
-          const percentage = Math.min(
-            100,
-            Math.round((inputTokens / contextWindow) * 100),
+
+          // 与 live 路径共用占用口径：turn input 为 0 时回退 total
+          const result = buildCodexContextUsage.fromTokenSnapshot(
+            {
+              inputTokens: usage.input_tokens,
+              cachedInputTokens: usage.cached_input_tokens,
+              totalTokens: usage.total_tokens,
+              modelContextWindow: contextWindow,
+            },
+            "persisted",
           );
 
-          return { inputTokens, percentage, contextWindow };
-        }
+          if (result.occupancyTokens === 0) continue;
+          return result;
+}
       }
     }
 

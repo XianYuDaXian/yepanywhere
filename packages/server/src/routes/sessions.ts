@@ -14,6 +14,7 @@ import {
   type ThinkingOption,
   type UploadedFile,
   type UrlProjectId,
+  buildCodexContextUsage,
   getModelContextWindow,
   isUrlProjectId,
   thinkingOptionToConfig,
@@ -470,7 +471,7 @@ function extractContextUsageFromSDKMessages(
   for (let i = sdkMessages.length - 1; i >= 0; i--) {
     const msg = sdkMessages[i];
     if (msg && msg.type === "assistant" && msg.usage) {
-      const usage = msg.usage as {
+const usage = msg.usage as {
         input_tokens?: number;
         output_tokens?: number;
         cached_input_tokens?: number;
@@ -478,13 +479,33 @@ function extractContextUsageFromSDKMessages(
         cache_creation_input_tokens?: number;
       };
 
-      // Codex context meter is based on fresh input tokens from the latest turn.
-      // Claude/OpenCode/Gemini paths continue to include cached+creation tokens.
-      const rawInputTokens = isCodexProvider
-        ? (usage.input_tokens ?? 0)
-        : (usage.input_tokens ?? 0) +
-          (usage.cache_read_input_tokens ?? 0) +
-          (usage.cache_creation_input_tokens ?? 0);
+      // Codex 与 persisted 路径统一占用口径（压缩后 input=0 时回退 total）
+      if (isCodexProvider) {
+        const turnInputTokens = usage.input_tokens ?? 0;
+        const cacheReadTokens =
+          usage.cached_input_tokens ?? usage.cache_read_input_tokens ?? 0;
+        const totalTokens =
+          typeof (usage as { total_tokens?: number }).total_tokens === "number"
+            ? (usage as { total_tokens?: number }).total_tokens!
+            : turnInputTokens + cacheReadTokens;
+        const occupancyTokens =
+          turnInputTokens > 0 ? turnInputTokens : totalTokens;
+        if (occupancyTokens === 0) continue;
+        return buildCodexContextUsage({
+          contextWindow: contextWindowSize,
+          occupancyTokens,
+          turnInputTokens,
+          cacheReadTokens,
+          totalTokens,
+          source: "live",
+        });
+      }
+
+      // Claude/OpenCode/Gemini：input + cache_read + cache_creation
+      const rawInputTokens =
+        (usage.input_tokens ?? 0) +
+        (usage.cache_read_input_tokens ?? 0) +
+        (usage.cache_creation_input_tokens ?? 0);
 
       // Skip messages with zero input tokens (incomplete streaming messages)
       if (rawInputTokens === 0) {
@@ -506,14 +527,7 @@ function extractContextUsageFromSDKMessages(
       if (usage.output_tokens !== undefined && usage.output_tokens > 0) {
         result.outputTokens = usage.output_tokens;
       }
-      if (isCodexProvider) {
-        if (
-          usage.cached_input_tokens !== undefined &&
-          usage.cached_input_tokens > 0
-        ) {
-          result.cacheReadTokens = usage.cached_input_tokens;
-        }
-      } else if (
+      if (
         usage.cache_read_input_tokens !== undefined &&
         usage.cache_read_input_tokens > 0
       ) {
@@ -527,7 +541,7 @@ function extractContextUsageFromSDKMessages(
       }
 
       return result;
-    }
+}
   }
   return undefined;
 }
