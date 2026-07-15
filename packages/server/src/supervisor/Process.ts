@@ -989,9 +989,10 @@ if (this.messageQueue) {
             content: message.text,
             timestamp: new Date().toISOString(),
             behavior: "steer",
-            expiresAt: now + 30_000,
+            expiresAt: now + 8_000,
           });
           this.emitDeferredQueueChange();
+          this.scheduleFollowUpPrune(8_000);
         }
         void this.steerFn(steerMessage)
           .then((steered) => {
@@ -1004,14 +1005,8 @@ if (this.messageQueue) {
               return;
             }
             if (message.tempId) {
-              const now = Date.now();
-              this.followUpStateByTempId.set(message.tempId, {
-                status: "sent",
-                content: message.text,
-                timestamp: new Date().toISOString(),
-                behavior: "steer",
-                expiresAt: now + 120_000,
-              });
+              // 已进入对话流后立刻移除底部卡片，避免刷新后仍挂在列表
+              this.followUpStateByTempId.delete(message.tempId);
               this.emitDeferredQueueChange();
             }
           })
@@ -1131,9 +1126,10 @@ if (this.messageQueue) {
       content: entry.message.text,
       timestamp: entry.timestamp,
       behavior: "steer",
-      expiresAt: now + 30_000,
+      expiresAt: now + 8_000,
     });
     this.emitDeferredQueueChange();
+    this.scheduleFollowUpPrune(8_000);
 
 const result = this.queueMessage(entry.message);
     if (!result.success) {
@@ -1148,18 +1144,7 @@ const result = this.queueMessage(entry.message);
       };
     }
 
-    // 最终 sent/steering 状态由 queueMessage 的 steer 路径维护；
-    // 这里只保证至少有一条 steering 摘要可展示。
-    if (!this.followUpStateByTempId.has(tempId)) {
-      this.followUpStateByTempId.set(tempId, {
-        status: "sent",
-        content: entry.message.text,
-        timestamp: entry.timestamp,
-        behavior: "steer",
-        expiresAt: now + 120_000,
-      });
-      this.emitDeferredQueueChange();
-    }
+    // queueMessage 的 steer 成功路径会自行清理状态；失败时上面已回滚排队
     return { success: true };
   }
 
@@ -1218,15 +1203,16 @@ const result = this.queueMessage(entry.message);
       status: "queued" as const,
       behavior: "queue" as const,
     }));
-    const followUps = Array.from(this.followUpStateByTempId.entries()).map(
-      ([tempId, state]) => ({
+    // 仅展示排队/引导中；sent 不进列表，避免底部残留
+    const followUps = Array.from(this.followUpStateByTempId.entries())
+      .filter(([, state]) => state.status !== "sent")
+      .map(([tempId, state]) => ({
         tempId,
         content: state.content,
         timestamp: state.timestamp,
         status: state.status,
         behavior: state.behavior,
-      }),
-    );
+      }));
     return [...queued, ...followUps];
   }
 
@@ -1243,11 +1229,28 @@ const result = this.queueMessage(entry.message);
   /** 清理过期的 steering/sent 状态 */
   private pruneFollowUpState(): void {
     const now = Date.now();
+    let changed = false;
     for (const [tempId, state] of this.followUpStateByTempId) {
       if (state.expiresAt <= now) {
         this.followUpStateByTempId.delete(tempId);
+        changed = true;
       }
     }
+    if (changed) {
+      // 直接 emit 当前摘要（再 prune 一次无害）
+      this.emit({
+        type: "deferred-queue",
+        messages: this.getDeferredQueueSummary(),
+      });
+    }
+  }
+
+  /** 安排一次延迟清理，确保过期卡片及时从客户端消失 */
+  private scheduleFollowUpPrune(delayMs: number): void {
+    const wait = Math.max(0, delayMs) + 20;
+    setTimeout(() => {
+      this.pruneFollowUpState();
+    }, wait);
   }
 
   /**

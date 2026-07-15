@@ -18,6 +18,11 @@ interface SlashCommandButtonProps {
   onOpenChange?: (open: boolean) => void;
   /** 自定义菜单内容；提供时替换默认文字命令列表 */
   renderMenu?: (args: { query: string; onClose: () => void }) => ReactNode;
+  /**
+   * 菜单由外层（输入区）渲染时设为 true。
+   * 按钮只负责开关态，不再把选框锚到右下角。
+   */
+  externalMenu?: boolean;
 }
 
 /**
@@ -32,6 +37,7 @@ export function SlashCommandButton({
   query = "",
   onOpenChange,
   renderMenu,
+  externalMenu = false,
 }: SlashCommandButtonProps) {
   const [isOpen, setIsOpen] = useState(false);
   const buttonRef = useRef<HTMLButtonElement>(null);
@@ -39,8 +45,11 @@ export function SlashCommandButton({
   const open = forceOpen || isOpen;
   const normalizedQuery = query.trim().toLowerCase();
   const visibleCommands = normalizedQuery
-    ? commands.filter((command) => command.toLowerCase().includes(normalizedQuery))
+    ? commands.filter((command) =>
+        command.toLowerCase().includes(normalizedQuery),
+      )
     : commands;
+  const showInlineMenu = open && !externalMenu;
 
   const setOpenState = useCallback(
     (next: boolean) => {
@@ -52,9 +61,9 @@ export function SlashCommandButton({
     [forceOpen, onOpenChange],
   );
 
-  // Close menu when clicking outside
+  // Close menu when clicking outside（仅内联菜单时）
   useEffect(() => {
-    if (!open) return;
+    if (!showInlineMenu) return;
 
     const handleClickOutside = (e: MouseEvent) => {
       if (
@@ -69,11 +78,11 @@ export function SlashCommandButton({
 
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, [open, setOpenState]);
+  }, [showInlineMenu, setOpenState]);
 
-  // Close menu on Escape
+  // Close menu on Escape（仅内联菜单时；外层菜单自行处理）
   useEffect(() => {
-    if (!open) return;
+    if (!showInlineMenu) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
@@ -84,7 +93,7 @@ export function SlashCommandButton({
 
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [open, setOpenState]);
+  }, [showInlineMenu, setOpenState]);
 
   const handleCommandClick = useCallback(
     (command: string) => {
@@ -94,8 +103,8 @@ export function SlashCommandButton({
     [onSelectCommand, setOpenState],
   );
 
-  // 无自定义菜单且无可展示命令时不渲染按钮
-  if (!renderMenu && commands.length === 0) {
+  // 无菜单内容可展示时不渲染按钮；外层菜单由输入区负责
+  if (!externalMenu && !renderMenu && commands.length === 0) {
     return null;
   }
 
@@ -114,7 +123,7 @@ export function SlashCommandButton({
       >
         <span className="slash-icon">/</span>
       </button>
-      {open && (
+      {showInlineMenu && (
         <div ref={menuRef} className="slash-command-menu-host">
           {renderMenu ? (
             renderMenu({

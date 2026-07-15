@@ -336,11 +336,14 @@ pendingMessages = [],
         </div>
       ))}
 {/* Deferred messages - queued server-side, waiting for agent turn to end */}
-      {deferredMessages.map((deferred, index) => {
+      {deferredMessages
+        // sent 已进入对话流，底部不再保留卡片
+        .filter((item) => (item.status ?? "queued") !== "sent")
+        .map((deferred, index, visible) => {
         const status = deferred.status ?? "queued";
         const queueIndex =
           status === "queued"
-            ? deferredMessages
+            ? visible
                 .slice(0, index)
                 .filter((item) => (item.status ?? "queued") === "queued").length
             : 0;

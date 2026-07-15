@@ -60,6 +60,11 @@ export interface MessageInputToolbarProps {
   onSlashMenuOpenChange?: (open: boolean) => void;
   /** 自定义 slash 菜单；提供后替换默认命令列表 */
   renderSlashMenu?: (args: { query: string; onClose: () => void }) => ReactNode;
+  /**
+   * true 时 slash 选框由输入区渲染，按钮不再挂菜单。
+   * 输入 `/` 时选框跟随输入进度出现在输入区上方。
+   */
+  externalSlashMenu?: boolean;
 
   // Context usage
   contextUsage?: ContextUsage;
@@ -119,6 +124,7 @@ export function MessageInputToolbar({
   slashMenuQuery = "",
   onSlashMenuOpenChange,
   renderSlashMenu,
+  externalSlashMenu = true,
   contextUsage,
   onContextUsageClick: _onContextUsageClick,
   isRunning,
@@ -219,6 +225,7 @@ export function MessageInputToolbar({
               query={slashMenuQuery}
               onOpenChange={onSlashMenuOpenChange}
               renderMenu={renderSlashMenu}
+              externalMenu={externalSlashMenu}
             />
           )}
         </div>

@@ -2437,29 +2437,159 @@ a.sidebar-nav-item {
 }
 
 /* Deferred messages - queued server-side */
+/* Codex 风格引导/排队气泡：右上标签 + 图标操作 */
 .deferred-message {
   margin-bottom: var(--space-3);
-  padding: 0.55rem 0.65rem;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 12px;
-  background: rgba(255, 255, 255, 0.03);
+  padding: 0;
+  border: none;
+  background: transparent;
+  width: 100%;
 }
 
-.deferred-message--steering {
-  border-color: rgba(59, 130, 246, 0.35);
+.deferred-message-card {
+  position: relative;
+  margin-left: auto;
+  width: fit-content;
+  max-width: min(80%, 36rem);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.35rem;
 }
 
-.deferred-message--sent {
+.deferred-message-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.35rem;
+  width: 100%;
+}
+
+.deferred-message-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  padding: 0 0.55rem;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  border: 1px solid transparent;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-muted);
+}
+
+.deferred-message-badge--queue {
+  border-color: rgba(250, 204, 21, 0.28);
+  background: rgba(250, 204, 21, 0.12);
+  color: #f6d365;
+}
+
+.deferred-message-badge--steer {
+  border-color: rgba(96, 165, 250, 0.35);
+  background: rgba(59, 130, 246, 0.16);
+  color: #93c5fd;
+}
+
+.deferred-message-badge--sent {
   border-color: rgba(16, 185, 129, 0.28);
-  opacity: 0.92;
+  background: rgba(16, 185, 129, 0.12);
+  color: var(--app-yep-green);
+}
+
+.deferred-message-icon-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.15rem;
+}
+
+.deferred-message-more-wrap {
+  position: relative;
+}
+
+.deferred-message-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-dimmed);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.deferred-message-icon-btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-primary);
+}
+
+.deferred-message-icon-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.deferred-message-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  min-width: 132px;
+  padding: 0.3rem;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--bg-surface) 96%, black 4%);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.35);
+  z-index: 20;
+}
+
+.deferred-message-menu-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: transparent;
+  color: var(--text-primary);
+  border-radius: 8px;
+  padding: 0.45rem 0.6rem;
+  font-size: var(--font-size-xs);
+  cursor: pointer;
+}
+
+.deferred-message-menu-item:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.deferred-message-menu-item:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .deferred-message-bubble {
-  opacity: 0.92;
-  border-left: 3px solid var(--attention-color);
-  padding-left: var(--space-2);
+  opacity: 1;
+  border-left: none;
+  padding: 0.55rem 0.75rem;
   white-space: pre-wrap;
   word-break: break-word;
+  max-width: 100%;
+  border-radius: 12px 4px 12px 12px;
+  background: var(--bg-user-message);
+}
+
+.deferred-message--steering .deferred-message-bubble {
+  box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.28);
+}
+
+.deferred-message--sent .deferred-message-bubble {
+  opacity: 0.9;
+}
+
+.deferred-message-edit-body {
+  width: min(100%, 28rem);
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
 }
 
 .deferred-message-editor {
@@ -2474,26 +2604,13 @@ a.sidebar-nav-item {
   font: inherit;
 }
 
-.deferred-message-footer {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-2);
-  margin-top: var(--space-2);
-  flex-wrap: wrap;
-}
-
-.deferred-message-status {
-  font-size: var(--font-size-xs);
-  color: var(--attention-color);
-  font-style: italic;
-}
-
+.deferred-message-edit-actions,
 .deferred-message-actions {
   display: flex;
   align-items: center;
   gap: 0.35rem;
   flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .deferred-message-action {
@@ -2514,42 +2631,29 @@ a.sidebar-nav-item {
   color: var(--app-yep-green);
 }
 
-.deferred-message-action:disabled,
-.deferred-message-cancel:disabled {
+.deferred-message-action:disabled {
   opacity: 0.5;
   cursor: not-allowed;
-}
-
-.deferred-message-cancel {
-  min-width: 32px;
-  min-height: 32px;
-  background: none;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  color: var(--text-dimmed);
-  cursor: pointer;
-  font-size: 16px;
-  line-height: 1;
-  padding: 0 0.45rem;
-  border-radius: 999px;
-}
-
-.deferred-message-cancel:hover {
-  color: var(--error-color);
 }
 
 .deferred-message-error {
   margin-top: 0.35rem;
   color: var(--error-color);
   font-size: var(--font-size-xs);
+  text-align: right;
 }
 
 @media (max-width: 600px) {
-  .deferred-message {
-    padding: 0.5rem 0.55rem;
+  .deferred-message-card {
+    max-width: 92%;
   }
 
-  .deferred-message-action,
-  .deferred-message-cancel {
+  .deferred-message-icon-btn {
+    width: 32px;
+    height: 32px;
+  }
+
+  .deferred-message-action {
     min-height: 36px;
   }
 }
@@ -3181,6 +3285,12 @@ a.sidebar-nav-item {
     margin-bottom: 0;
   }
 
+  .slash-command-menu-host--input {
+    top: auto;
+    transform: none;
+    width: auto;
+  }
+
   .slash-command-menu {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -3259,6 +3369,22 @@ a.sidebar-nav-item {
   left: 0;
   margin-bottom: var(--space-1);
   z-index: 100;
+}
+
+/* 跟随输入进度：锚定在输入区上方，左对齐输入框 */
+.slash-command-menu-host--input {
+  left: 0;
+  right: auto;
+  bottom: auto;
+  top: 0;
+  transform: translateY(calc(-100% - 8px));
+  margin-bottom: 0;
+  width: min(420px, 100%);
+  max-width: 100%;
+}
+
+.message-input {
+  position: relative;
 }
 
 /* Codex 完整 slash 面板 */
@@ -9114,6 +9240,17 @@ a.sidebar-nav-item {
   bottom: calc(100% + 8px);
   left: 0;
   z-index: 30;
+}
+
+.slash-command-menu-host--input {
+  left: 0;
+  right: auto;
+  bottom: auto;
+  top: 0;
+  transform: translateY(calc(-100% - 8px));
+  width: min(420px, 100%);
+  max-width: 100%;
+  z-index: 40;
 }
 
 .codex-slash-panel {

@@ -347,17 +347,20 @@ export function MessageInput({
       return;
     }
 
+    // slash 面板打开时，Enter 只做选择，不发送消息
     if (
       slashQueryState &&
-      !useCodexSlashPanel &&
       e.key === "Enter" &&
       !e.shiftKey &&
       !e.ctrlKey &&
-      !e.nativeEvent.isComposing &&
-      filteredSlashCommands.length > 0
+      !e.nativeEvent.isComposing
     ) {
       e.preventDefault();
-      handleSlashCommand(`/${filteredSlashCommands[0]}`);
+      e.stopPropagation();
+      if (!useCodexSlashPanel && filteredSlashCommands.length > 0) {
+        handleSlashCommand(`/${filteredSlashCommands[0]}`);
+      }
+      // Codex 完整面板由 CodexSlashPanel 的 document 监听处理选择
       return;
     }
 
@@ -488,6 +491,27 @@ export function MessageInput({
     setSlashQueryState(null);
   }, [setText, slashQueryState, text]);
 
+  const closeSlashMenu = useCallback(() => {
+    setSlashQueryState(null);
+  }, []);
+
+  // slash 选框挂在输入区上方：点击外部关闭
+  useEffect(() => {
+    if (!slashQueryState) return;
+    const handleMouseDown = (event: MouseEvent) => {
+      const target = event.target as Node | null;
+      if (!target) return;
+      const host = document.querySelector(".slash-command-menu-host--input");
+      const textarea = textareaRef.current;
+      if (host?.contains(target) || textarea?.contains(target)) return;
+      // 工具栏 / 按钮点击由自身切换，不在此关闭
+      if ((target as HTMLElement).closest?.(".slash-command-button")) return;
+      setSlashQueryState(null);
+    };
+    document.addEventListener("mousedown", handleMouseDown);
+    return () => document.removeEventListener("mousedown", handleMouseDown);
+  }, [slashQueryState]);
+
   const handleCodexBuiltinSelect = useCallback(
     (id: CodexSlashBuiltinId) => {
       clearSlashToken();
@@ -547,6 +571,46 @@ export function MessageInput({
     [text, setText, onCustomCommand, slashQueryState],
   );
 
+  const renderInputSlashMenu = () => {
+    if (!slashQueryState) return null;
+    const query = slashQueryState.query;
+    if (useCodexSlashPanel && codexSlashPanel) {
+      return (
+        <CodexSlashPanel
+          query={query}
+          builtins={codexSlashPanel.builtins}
+          skills={codexSlashPanel.skills}
+          loadingSkills={codexSlashPanel.loadingSkills}
+          onSelectBuiltin={handleCodexBuiltinSelect}
+          onSelectSkill={handleCodexSkillSelect}
+          onClose={closeSlashMenu}
+        />
+      );
+    }
+    return (
+      <div
+        className="slash-command-menu"
+        role="menu"
+        aria-label="Slash commands"
+      >
+        {filteredSlashCommands.map((command) => (
+          <button
+            key={command}
+            type="button"
+            className="slash-command-item"
+            onClick={() => handleSlashCommand(`/${command}`)}
+            role="menuitem"
+          >
+            /{command}
+          </button>
+        ))}
+        {filteredSlashCommands.length === 0 && (
+          <div className="slash-command-empty">No commands</div>
+        )}
+      </div>
+    );
+  };
+
   return (
     <div className="message-input-wrapper">
       {/* Floating toggle button - only show when user can control collapse (not externally collapsed) */}
@@ -579,6 +643,12 @@ export function MessageInput({
       <div
         className={`message-input ${collapsed ? "message-input-collapsed" : ""} ${interimTranscript ? "voice-recording" : ""}`}
       >
+        {/* slash 选框跟随输入进度，锚定在输入区上方而非右下角 / 按钮 */}
+        {slashQueryState && !collapsed && (
+          <div className="slash-command-menu-host slash-command-menu-host--input">
+            {renderInputSlashMenu()}
+          </div>
+        )}
         <textarea
           ref={textareaRef}
           value={displayText}
@@ -696,23 +766,24 @@ export function MessageInput({
             onSlashMenuOpenChange={(open) => {
               if (!open) {
                 setSlashQueryState(null);
+                return;
+              }
+              // 点击 / 按钮打开时，若输入区尚无 slash token，则插入 /
+              if (!slashQueryState) {
+                const textarea = textareaRef.current;
+                const value = text;
+                const caret = textarea?.selectionStart ?? value.length;
+                const next = `${value.slice(0, caret)}/${value.slice(caret)}`;
+                setText(next);
+                const nextCaret = caret + 1;
+                setSlashQueryState({ query: "", start: caret, end: nextCaret });
+                requestAnimationFrame(() => {
+                  textarea?.focus();
+                  textarea?.setSelectionRange(nextCaret, nextCaret);
+                });
               }
             }}
-            renderSlashMenu={
-              useCodexSlashPanel && codexSlashPanel
-                ? ({ query, onClose }) => (
-                    <CodexSlashPanel
-                      query={query}
-                      builtins={codexSlashPanel.builtins}
-                      skills={codexSlashPanel.skills}
-                      loadingSkills={codexSlashPanel.loadingSkills}
-                      onSelectBuiltin={handleCodexBuiltinSelect}
-                      onSelectSkill={handleCodexSkillSelect}
-                      onClose={onClose}
-                    />
-                  )
-                : undefined
-            }
+            externalSlashMenu
             contextUsage={contextUsage}
             onContextUsageClick={onContextUsageClick}
             isRunning={isRunning}

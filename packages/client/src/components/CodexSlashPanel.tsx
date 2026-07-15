@@ -112,6 +112,7 @@ export function CodexSlashPanel({
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         event.preventDefault();
+        event.stopPropagation();
         onClose();
         return;
       }
@@ -119,19 +120,23 @@ export function CodexSlashPanel({
       const currentPos = Math.max(0, selectableIndexes.indexOf(activeIndex));
       if (event.key === "ArrowDown") {
         event.preventDefault();
+        event.stopPropagation();
         const nextPos = (currentPos + 1) % selectableIndexes.length;
         setActiveIndex(selectableIndexes[nextPos] ?? 0);
         return;
       }
       if (event.key === "ArrowUp") {
         event.preventDefault();
+        event.stopPropagation();
         const nextPos =
           (currentPos - 1 + selectableIndexes.length) % selectableIndexes.length;
         setActiveIndex(selectableIndexes[nextPos] ?? 0);
         return;
       }
       if (event.key === "Enter" && !event.shiftKey) {
+        // 捕获阶段拦截 Enter：只选择命令，禁止输入框发送
         event.preventDefault();
+        event.stopPropagation();
         const current = flatItems[activeIndex];
         if (!current) return;
         if (current.kind === "builtin") {
@@ -143,8 +148,9 @@ export function CodexSlashPanel({
         onClose();
       }
     };
-    document.addEventListener("keydown", handleKeyDown);
-    return () => document.removeEventListener("keydown", handleKeyDown);
+    // 使用捕获阶段，确保优先于 textarea 的发送逻辑
+    document.addEventListener("keydown", handleKeyDown, true);
+    return () => document.removeEventListener("keydown", handleKeyDown, true);
   }, [
     activeIndex,
     flatItems,
