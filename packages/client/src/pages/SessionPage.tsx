@@ -56,6 +56,7 @@ import { preprocessMessages } from "../lib/preprocessMessages";
 import { generateUUID } from "../lib/uuid";
 import { getSessionDisplayTitle } from "../utils";
 import type { FollowUpBehavior } from "../lib/followUpBehavior";
+import { prepareFilesForUpload } from "../lib/imageCompression";
 
 export function SessionPage() {
   const { projectId, sessionId } = useParams<{
@@ -1093,63 +1094,81 @@ const appendToDraft = useCallback((value: string) => {
   // so handleSend can wait for in-flight uploads before sending
   const handleAttach = useCallback(
     (files: File[]) => {
-      for (const file of files) {
+      for (const originalFile of files) {
         const tempId = generateUUID();
 
-        // Add to progress tracking
+        // 立刻登记进度与 Promise：发送时会等待压缩+上传完成
         setUploadProgress((prev) => [
           ...prev,
           {
             fileId: tempId,
-            fileName: file.name,
+            fileName: originalFile.name,
             bytesUploaded: 0,
-            totalBytes: file.size,
+            totalBytes: originalFile.size,
             percent: 0,
           },
         ]);
 
-        // Start upload and track promise for handleSend to await
-        const uploadPromise = connection
-          .upload(projectId, sessionId, file, {
-            onProgress: (bytesUploaded) => {
-              setUploadProgress((prev) =>
-                prev.map((p) =>
-                  p.fileId === tempId
-                    ? {
-                        ...p,
-                        bytesUploaded,
-                        percent: Math.round((bytesUploaded / file.size) * 100),
-                      }
-                    : p,
-                ),
-              );
-            },
-          })
-          .then(
-            (uploaded) => {
-              setAttachments((prev) => [...prev, uploaded]);
-              return uploaded;
-            },
-            (err) => {
-              console.error("Upload failed:", err);
-              const errorMsg =
-                err instanceof Error ? err.message : t("sessionShareFailed");
-              showToast(
-                t("sessionUploadFailed", {
-                  file: file.name,
-                  message: errorMsg,
-                }),
-                "error",
-              );
-              return null as UploadedFile | null;
-            },
-          )
-          .finally(() => {
+        const uploadPromise = (async () => {
+          // 发图前压缩，避免大图塞爆上下文（对齐 Grok CLI）
+          let file = originalFile;
+          try {
+            const prepared = await prepareFilesForUpload([originalFile]);
+            file = prepared[0] ?? originalFile;
+            setUploadProgress((prev) =>
+              prev.map((p) =>
+                p.fileId === tempId
+                  ? {
+                      ...p,
+                      fileName: file.name,
+                      totalBytes: file.size,
+                    }
+                  : p,
+              ),
+            );
+          } catch (err) {
+            console.warn("Image compress failed, upload original:", err);
+          }
+
+          try {
+            const uploaded = await connection.upload(projectId, sessionId, file, {
+              onProgress: (bytesUploaded) => {
+                setUploadProgress((prev) =>
+                  prev.map((p) =>
+                    p.fileId === tempId
+                      ? {
+                          ...p,
+                          bytesUploaded,
+                          percent: Math.round(
+                            (bytesUploaded / Math.max(file.size, 1)) * 100,
+                          ),
+                        }
+                      : p,
+                  ),
+                );
+              },
+            });
+            setAttachments((prev) => [...prev, uploaded]);
+            return uploaded;
+          } catch (err) {
+            console.error("Upload failed:", err);
+            const errorMsg =
+              err instanceof Error ? err.message : t("sessionShareFailed");
+            showToast(
+              t("sessionUploadFailed", {
+                file: file.name,
+                message: errorMsg,
+              }),
+              "error",
+            );
+            return null as UploadedFile | null;
+          } finally {
             setUploadProgress((prev) =>
               prev.filter((p) => p.fileId !== tempId),
             );
             pendingUploadsRef.current.delete(tempId);
-          });
+          }
+        })();
 
         pendingUploadsRef.current.set(tempId, uploadPromise);
       }

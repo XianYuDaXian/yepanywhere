@@ -34,6 +34,7 @@ import { useRemoteExecutors } from "../hooks/useRemoteExecutors";
 import { useServerSettings } from "../hooks/useServerSettings";
 import { useI18n } from "../i18n";
 import { hasCoarsePointer } from "../lib/deviceDetection";
+import { prepareFilesForUpload } from "../lib/imageCompression";
 import type { PermissionMode } from "../types";
 import { FilterDropdown, type FilterOption } from "./FilterDropdown";
 import { clearFabPrefill, getFabPrefill } from "./FloatingActionButton";
@@ -369,17 +370,20 @@ export function NewSessionForm({
   const handleFileSelect = (e: ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files?.length) return;
-
-    const newPendingFiles: PendingFile[] = Array.from(files).map((file) => ({
-      id: `pending-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-      file,
-      previewUrl: file.type.startsWith("image/")
-        ? URL.createObjectURL(file)
-        : undefined,
-    }));
-
-    setPendingFiles((prev) => [...prev, ...newPendingFiles]);
+    const selected = Array.from(files);
     e.target.value = ""; // Reset for re-selection
+
+    // 发图前压缩，再进入待上传列表
+    void prepareFilesForUpload(selected).then((prepared) => {
+      const newPendingFiles: PendingFile[] = prepared.map((file) => ({
+        id: `pending-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        file,
+        previewUrl: file.type.startsWith("image/")
+          ? URL.createObjectURL(file)
+          : undefined,
+      }));
+      setPendingFiles((prev) => [...prev, ...newPendingFiles]);
+    });
   };
 
   const handleRemoveFile = (id: string) => {
@@ -625,14 +629,16 @@ export function NewSessionForm({
 
     if (files.length > 0) {
       e.preventDefault();
-      const newPendingFiles: PendingFile[] = files.map((file) => ({
-        id: `pending-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-        file,
-        previewUrl: file.type.startsWith("image/")
-          ? URL.createObjectURL(file)
-          : undefined,
-      }));
-      setPendingFiles((prev) => [...prev, ...newPendingFiles]);
+      void prepareFilesForUpload(files).then((prepared) => {
+        const newPendingFiles: PendingFile[] = prepared.map((file) => ({
+          id: `pending-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+          file,
+          previewUrl: file.type.startsWith("image/")
+            ? URL.createObjectURL(file)
+            : undefined,
+        }));
+        setPendingFiles((prev) => [...prev, ...newPendingFiles]);
+      });
     }
   };
 
