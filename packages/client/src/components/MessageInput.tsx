@@ -512,20 +512,51 @@ export function MessageInput({
     return () => document.removeEventListener("mousedown", handleMouseDown);
   }, [slashQueryState]);
 
+  // 选中内建项：先去掉 /token，再执行动作（对齐 Codex CLI，不残留 /）
   const handleCodexBuiltinSelect = useCallback(
     (id: CodexSlashBuiltinId) => {
-      clearSlashToken();
+      if (slashQueryState) {
+        const nextText =
+          text.slice(0, slashQueryState.start) + text.slice(slashQueryState.end);
+        setText(nextText);
+      }
+      setSlashQueryState(null);
       codexSlashPanel?.onSelectBuiltin(id);
+      requestAnimationFrame(() => {
+        textareaRef.current?.focus();
+      });
     },
-    [clearSlashToken, codexSlashPanel],
+    [slashQueryState, text, setText, codexSlashPanel],
   );
 
+  // 选中技能：用 $name 原子替换 /token，避免 clear 与 append 竞态残留 /
   const handleCodexSkillSelect = useCallback(
     (name: string) => {
-      clearSlashToken();
+      const insertion = `$${name}`;
+      if (slashQueryState) {
+        const nextText =
+          text.slice(0, slashQueryState.start) +
+          insertion +
+          text.slice(slashQueryState.end);
+        const caret = slashQueryState.start + insertion.length;
+        setText(nextText);
+        setSlashQueryState(null);
+        requestAnimationFrame(() => {
+          const textarea = textareaRef.current;
+          if (!textarea) return;
+          textarea.focus();
+          textarea.setSelectionRange(caret, caret);
+        });
+        return;
+      }
+      // 无 slash token 时走父级追加逻辑
       codexSlashPanel?.onSelectSkill(name);
+      setSlashQueryState(null);
+      requestAnimationFrame(() => {
+        textareaRef.current?.focus();
+      });
     },
-    [clearSlashToken, codexSlashPanel],
+    [slashQueryState, text, setText, codexSlashPanel],
   );
 
   // Handle slash command selection - insert command into text

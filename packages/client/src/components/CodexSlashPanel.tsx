@@ -51,6 +51,7 @@ export function CodexSlashPanel({
 }: CodexSlashPanelProps) {
   const { t } = useI18n();
   const panelRef = useRef<HTMLDivElement>(null);
+  const itemRefs = useRef<Map<number, HTMLElement>>(new Map());
   const [activeIndex, setActiveIndex] = useState(0);
   const normalizedQuery = query.trim().toLowerCase();
 
@@ -96,6 +97,24 @@ export function CodexSlashPanel({
   useEffect(() => {
     setActiveIndex(selectableIndexes[0] ?? 0);
   }, [normalizedQuery, selectableIndexes.join(",")]);
+
+  // 方向键切换时，当前高亮项滚入可视区（对齐 Codex CLI）
+  useEffect(() => {
+    const node = itemRefs.current.get(activeIndex);
+    const panel = panelRef.current;
+    if (!node || !panel) return;
+
+    // 优先在面板内滚动；测试环境可能没有 scrollIntoView
+    const nodeTop = node.offsetTop;
+    const nodeBottom = nodeTop + node.offsetHeight;
+    const viewTop = panel.scrollTop;
+    const viewBottom = viewTop + panel.clientHeight;
+    if (nodeTop < viewTop) {
+      panel.scrollTop = nodeTop;
+    } else if (nodeBottom > viewBottom) {
+      panel.scrollTop = nodeBottom - panel.clientHeight;
+    }
+  }, [activeIndex, flatItems.length]);
 
   useEffect(() => {
     const handleMouseDown = (event: MouseEvent) => {
@@ -160,6 +179,14 @@ export function CodexSlashPanel({
     selectableIndexes,
   ]);
 
+  const setItemRef = (index: number, node: HTMLButtonElement | null) => {
+    if (node) {
+      itemRefs.current.set(index, node);
+    } else {
+      itemRefs.current.delete(index);
+    }
+  };
+
   const activate = (index: number) => {
     const current = flatItems[index];
     if (!current) return;
@@ -188,6 +215,7 @@ export function CodexSlashPanel({
             return (
               <button
                 key={item.id}
+                ref={(node) => setItemRef(index, node)}
                 type="button"
                 role="option"
                 aria-selected={index === activeIndex}
@@ -227,6 +255,7 @@ export function CodexSlashPanel({
             return (
               <button
                 key={`${item.scope}:${item.name}`}
+                ref={(node) => setItemRef(index, node)}
                 type="button"
                 role="option"
                 aria-selected={index === activeIndex}
