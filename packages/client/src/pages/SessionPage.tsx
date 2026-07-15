@@ -1702,7 +1702,7 @@ deferredMessages={deferredMessages}
                         : undefined
                     }
 contextUsage={session?.contextUsage}
-                                        isRunning={status.owner === "self"}
+                                        isRunning={status.owner === "self" && processState !== "idle"}
                     isThinking={processState === "in-turn"}
                     onStop={handleAbort}
                     pendingApproval={
@@ -1774,7 +1774,7 @@ contextUsage={session?.contextUsage}
                     ? handleReasoningSelect
                     : undefined
                 }
-                isRunning={status.owner === "self"}
+                isRunning={status.owner === "self" && processState !== "idle"}
                 isThinking={processState === "in-turn"}
                 onStop={handleAbort}
                 draftKey={`draft-message-${sessionId}`}
